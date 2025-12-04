@@ -1,4 +1,4 @@
-module github.com/tailor-inc/graphql
+module github.com/tailor-platform/graphql
 
 go 1.21
 

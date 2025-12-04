@@ -3,8 +3,8 @@ package graphql
 import (
 	"fmt"
 
-	"github.com/tailor-inc/graphql/language/ast"
-	"github.com/tailor-inc/graphql/language/parser"
+	"github.com/tailor-platform/graphql/language/ast"
+	"github.com/tailor-platform/graphql/language/parser"
 )
 
 const (

@@ -2,7 +2,7 @@ package gqlerrors
 
 import (
 	"errors"
-	"github.com/tailor-inc/graphql/language/ast"
+	"github.com/tailor-platform/graphql/language/ast"
 )
 
 // NewLocatedError creates a graphql.Error with location info

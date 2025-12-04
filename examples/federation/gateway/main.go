@@ -3,7 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
-	http2 "github.com/tailor-inc/graphql/federation/gateway/http"
+	http2 "github.com/tailor-platform/graphql/federation/gateway/http"
 	"net/http"
 	"strings"
 	"time"

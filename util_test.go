@@ -7,8 +7,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tailor-inc/graphql"
-	"github.com/tailor-inc/graphql/testutil"
+	"github.com/tailor-platform/graphql"
+	"github.com/tailor-platform/graphql/testutil"
 )
 
 type Person struct {

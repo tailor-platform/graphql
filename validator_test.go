@@ -3,13 +3,13 @@ package graphql_test
 import (
 	"testing"
 
-	"github.com/tailor-inc/graphql"
-	"github.com/tailor-inc/graphql/gqlerrors"
-	"github.com/tailor-inc/graphql/language/ast"
-	"github.com/tailor-inc/graphql/language/location"
-	"github.com/tailor-inc/graphql/language/parser"
-	"github.com/tailor-inc/graphql/language/source"
-	"github.com/tailor-inc/graphql/testutil"
+	"github.com/tailor-platform/graphql"
+	"github.com/tailor-platform/graphql/gqlerrors"
+	"github.com/tailor-platform/graphql/language/ast"
+	"github.com/tailor-platform/graphql/language/location"
+	"github.com/tailor-platform/graphql/language/parser"
+	"github.com/tailor-platform/graphql/language/source"
+	"github.com/tailor-platform/graphql/testutil"
 )
 
 func expectValid(t *testing.T, schema *graphql.Schema, queryString string) {

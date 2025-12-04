@@ -3,8 +3,8 @@ package graphql_test
 import (
 	"testing"
 
-	"github.com/tailor-inc/graphql"
-	"github.com/tailor-inc/graphql/benchutil"
+	"github.com/tailor-platform/graphql"
+	"github.com/tailor-platform/graphql/benchutil"
 )
 
 type B struct {

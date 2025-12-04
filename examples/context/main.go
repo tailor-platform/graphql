@@ -7,7 +7,7 @@ import (
 	"log"
 	"net/http"
 
-	"github.com/tailor-inc/graphql"
+	"github.com/tailor-platform/graphql"
 )
 
 var Schema graphql.Schema

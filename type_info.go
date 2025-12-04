@@ -1,8 +1,8 @@
 package graphql
 
 import (
-	"github.com/tailor-inc/graphql/language/ast"
-	"github.com/tailor-inc/graphql/language/kinds"
+	"github.com/tailor-platform/graphql/language/ast"
+	"github.com/tailor-platform/graphql/language/kinds"
 )
 
 // TODO: can move TypeInfo to a utils package if there ever is one

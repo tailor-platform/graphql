@@ -3,7 +3,7 @@ package benchutil
 import (
 	"fmt"
 
-	"github.com/tailor-inc/graphql"
+	"github.com/tailor-platform/graphql"
 )
 
 type color struct {

@@ -4,10 +4,10 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/tailor-inc/graphql"
-	"github.com/tailor-inc/graphql/gqlerrors"
-	"github.com/tailor-inc/graphql/language/location"
-	"github.com/tailor-inc/graphql/testutil"
+	"github.com/tailor-platform/graphql"
+	"github.com/tailor-platform/graphql/gqlerrors"
+	"github.com/tailor-platform/graphql/language/location"
+	"github.com/tailor-platform/graphql/testutil"
 )
 
 // testNumberHolder maps to numberHolderType

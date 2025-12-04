@@ -8,8 +8,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/tailor-inc/graphql/gqlerrors"
-	"github.com/tailor-inc/graphql/language/ast"
+	"github.com/tailor-platform/graphql/gqlerrors"
+	"github.com/tailor-platform/graphql/language/ast"
 )
 
 type ExecuteParams struct {

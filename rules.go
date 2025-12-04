@@ -7,11 +7,11 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/tailor-inc/graphql/gqlerrors"
-	"github.com/tailor-inc/graphql/language/ast"
-	"github.com/tailor-inc/graphql/language/kinds"
-	"github.com/tailor-inc/graphql/language/printer"
-	"github.com/tailor-inc/graphql/language/visitor"
+	"github.com/tailor-platform/graphql/gqlerrors"
+	"github.com/tailor-platform/graphql/language/ast"
+	"github.com/tailor-platform/graphql/language/kinds"
+	"github.com/tailor-platform/graphql/language/printer"
+	"github.com/tailor-platform/graphql/language/visitor"
 )
 
 // SpecifiedRules set includes all validation rules defined by the GraphQL spec.

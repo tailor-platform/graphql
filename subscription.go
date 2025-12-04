@@ -4,9 +4,9 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/tailor-inc/graphql/gqlerrors"
-	"github.com/tailor-inc/graphql/language/parser"
-	"github.com/tailor-inc/graphql/language/source"
+	"github.com/tailor-platform/graphql/gqlerrors"
+	"github.com/tailor-platform/graphql/language/parser"
+	"github.com/tailor-platform/graphql/language/source"
 )
 
 // SubscribeParams parameters for subscribing

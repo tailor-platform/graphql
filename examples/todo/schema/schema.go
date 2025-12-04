@@ -3,7 +3,7 @@ package schema
 import (
 	"math/rand"
 
-	"github.com/tailor-inc/graphql"
+	"github.com/tailor-platform/graphql"
 )
 
 var TodoList []Todo

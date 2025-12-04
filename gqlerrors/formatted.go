@@ -3,7 +3,7 @@ package gqlerrors
 import (
 	"errors"
 
-	"github.com/tailor-inc/graphql/language/location"
+	"github.com/tailor-platform/graphql/language/location"
 )
 
 type ExtendedError interface {

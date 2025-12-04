@@ -1,4 +1,4 @@
-module github.com/tailor-inc/graphql/federation
+module github.com/tailor-platform/graphql/federation
 
 go 1.24.0
 
@@ -8,12 +8,12 @@ require (
 	github.com/gobwas/ws v1.3.0
 	github.com/gorilla/mux v1.8.0
 	github.com/jensneuse/abstractlogger v0.0.4
-	github.com/tailor-inc/graphql v0.0.1
+	github.com/tailor-platform/graphql v0.0.1
 	github.com/wundergraph/graphql-go-tools v1.67.0
 	go.uber.org/zap v1.26.0
 )
 
-replace github.com/tailor-inc/graphql => ../../
+replace github.com/tailor-platform/graphql => ../../
 
 require (
 	github.com/Masterminds/goutils v1.1.1 // indirect
