@@ -4,8 +4,8 @@ import (
 	"encoding/json"
 	"reflect"
 
-	"github.com/tailor-inc/graphql/language/ast"
-	"github.com/tailor-inc/graphql/language/typeInfo"
+	"github.com/tailor-platform/graphql/language/ast"
+	"github.com/tailor-platform/graphql/language/typeInfo"
 )
 
 const (

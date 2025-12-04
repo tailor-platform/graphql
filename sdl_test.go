@@ -2,7 +2,7 @@ package graphql
 
 import (
 	"github.com/stretchr/testify/assert"
-	"github.com/tailor-inc/graphql/language/printer"
+	"github.com/tailor-platform/graphql/language/printer"
 	"testing"
 )
 

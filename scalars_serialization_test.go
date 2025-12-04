@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/tailor-inc/graphql"
+	"github.com/tailor-platform/graphql"
 )
 
 type intSerializationTest struct {

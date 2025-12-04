@@ -3,7 +3,7 @@ package location
 import (
 	"regexp"
 
-	"github.com/tailor-inc/graphql/language/source"
+	"github.com/tailor-platform/graphql/language/source"
 )
 
 type SourceLocation struct {

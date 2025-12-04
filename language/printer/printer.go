@@ -7,8 +7,8 @@ import (
 
 	"reflect"
 
-	"github.com/tailor-inc/graphql/language/ast"
-	"github.com/tailor-inc/graphql/language/visitor"
+	"github.com/tailor-platform/graphql/language/ast"
+	"github.com/tailor-platform/graphql/language/visitor"
 )
 
 func getMapValue(m map[string]interface{}, key string) interface{} {

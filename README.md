@@ -1,4 +1,4 @@
-# graphql [![Go package](https://github.com/tailor-inc/graphql/actions/workflows/ci.yml/badge.svg)](https://github.com/tailor-inc/graphql/actions/workflows/ci.yml) [![Go Reference](https://pkg.go.dev/badge/github.com/tailor-inc/graphql.svg)](https://pkg.go.dev/github.com/tailor-inc/graphql)
+# graphql [![Go package](https://github.com/tailor-platform/graphql/actions/workflows/ci.yml/badge.svg)](https://github.com/tailor-platform/graphql/actions/workflows/ci.yml) [![Go Reference](https://pkg.go.dev/badge/github.com/tailor-platform/graphql.svg)](https://pkg.go.dev/github.com/tailor-platform/graphql)
 
 An implementation of GraphQL in Go. Follows the official reference implementation [`graphql-js`](https://github.com/graphql/graphql-js).
 
@@ -6,13 +6,14 @@ Supports: queries, mutations & subscriptions.
 
 ### Documentation
 
-godoc: https://pkg.go.dev/github.com/tailor-inc/graphql
+godoc: https://pkg.go.dev/github.com/tailor-platform/graphql
 
 ### Getting Started
 
 To install the library, run:
+
 ```bash
-go get github.com/tailor-inc/graphql
+go get github.com/tailor-platform/graphql
 ```
 
 The following is a simple example which defines a schema with a single `hello` string-type field and a `Resolve` method which returns the string `world`. A GraphQL query is performed against this schema with the resulting output printed in JSON format.
@@ -25,7 +26,7 @@ import (
 	"fmt"
 	"log"
 
-	"github.com/tailor-inc/graphql"
+	"github.com/tailor-platform/graphql"
 )
 
 func main() {
@@ -60,16 +61,18 @@ func main() {
 	fmt.Printf("%s \n", rJSON) // {"data":{"hello":"world"}}
 }
 ```
-For more complex examples, refer to the [examples/](https://github.com/tailor-inc/graphql/tree/master/examples/) directory and [graphql_test.go](https://github.com/tailor-inc/graphql/blob/master/graphql_test.go).
+
+For more complex examples, refer to the [examples/](https://github.com/tailor-platform/graphql/tree/master/examples/) directory and [graphql_test.go](https://github.com/tailor-platform/graphql/blob/master/graphql_test.go).
 
 ### Third Party Libraries
-| Name          | Author        | Description  |
-|:-------------:|:-------------:|:------------:|
-| [graphql-go-handler](https://github.com/tailor-inc/graphql-go-handler) | [Hafiz Ismail](https://github.com/sogko) | Middleware to handle GraphQL queries through HTTP requests. |
-| [graphql-relay-go](https://github.com/tailor-inc/graphql-relay-go) | [Hafiz Ismail](https://github.com/sogko) | Lib to construct a graphql-go server supporting react-relay. |
-| [golang-relay-starter-kit](https://github.com/sogko/golang-relay-starter-kit) | [Hafiz Ismail](https://github.com/sogko) | Barebones starting point for a Relay application with Golang GraphQL server. |
-| [dataloader](https://github.com/nicksrandall/dataloader) | [Nick Randall](https://github.com/nicksrandall) | [DataLoader](https://github.com/facebook/dataloader) implementation in Go. |
+
+|                                     Name                                      |                     Author                      |                                 Description                                  |
+| :---------------------------------------------------------------------------: | :---------------------------------------------: | :--------------------------------------------------------------------------: |
+|  [graphql-go-handler](https://github.com/tailor-platform/graphql-go-handler)  |    [Hafiz Ismail](https://github.com/sogko)     |         Middleware to handle GraphQL queries through HTTP requests.          |
+|    [graphql-relay-go](https://github.com/tailor-platform/graphql-relay-go)    |    [Hafiz Ismail](https://github.com/sogko)     |         Lib to construct a graphql-go server supporting react-relay.         |
+| [golang-relay-starter-kit](https://github.com/sogko/golang-relay-starter-kit) |    [Hafiz Ismail](https://github.com/sogko)     | Barebones starting point for a Relay application with Golang GraphQL server. |
+|           [dataloader](https://github.com/nicksrandall/dataloader)            | [Nick Randall](https://github.com/nicksrandall) |  [DataLoader](https://github.com/facebook/dataloader) implementation in Go.  |
 
 ### Blog Posts
-- [Golang + GraphQL + Relay](https://wehavefaces.net/learn-golang-graphql-relay-1-e59ea174a902)
 
+- [Golang + GraphQL + Relay](https://wehavefaces.net/learn-golang-graphql-relay-1-e59ea174a902)

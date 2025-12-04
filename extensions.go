@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/tailor-inc/graphql/gqlerrors"
+	"github.com/tailor-platform/graphql/gqlerrors"
 )
 
 type (

@@ -5,8 +5,8 @@ import (
 	"reflect"
 	"sort"
 
-	"github.com/tailor-inc/graphql/language/ast"
-	"github.com/tailor-inc/graphql/language/printer"
+	"github.com/tailor-platform/graphql/language/ast"
+	"github.com/tailor-platform/graphql/language/printer"
 )
 
 const (

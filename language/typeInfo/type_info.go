@@ -1,7 +1,7 @@
 package typeInfo
 
 import (
-	"github.com/tailor-inc/graphql/language/ast"
+	"github.com/tailor-platform/graphql/language/ast"
 )
 
 // TypeInfoI defines the interface for TypeInfo Implementation

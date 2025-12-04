@@ -3,10 +3,10 @@ package parser
 import (
 	"fmt"
 
-	"github.com/tailor-inc/graphql/gqlerrors"
-	"github.com/tailor-inc/graphql/language/ast"
-	"github.com/tailor-inc/graphql/language/lexer"
-	"github.com/tailor-inc/graphql/language/source"
+	"github.com/tailor-platform/graphql/gqlerrors"
+	"github.com/tailor-platform/graphql/language/ast"
+	"github.com/tailor-platform/graphql/language/lexer"
+	"github.com/tailor-platform/graphql/language/source"
 )
 
 type parseFn func(parser *Parser) (interface{}, error)

@@ -1,7 +1,7 @@
 package ast
 
 import (
-	"github.com/tailor-inc/graphql/language/source"
+	"github.com/tailor-platform/graphql/language/source"
 )
 
 type Location struct {

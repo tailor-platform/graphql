@@ -5,11 +5,11 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/tailor-inc/graphql"
-	"github.com/tailor-inc/graphql/gqlerrors"
-	"github.com/tailor-inc/graphql/language/ast"
-	"github.com/tailor-inc/graphql/language/location"
-	"github.com/tailor-inc/graphql/testutil"
+	"github.com/tailor-platform/graphql"
+	"github.com/tailor-platform/graphql/gqlerrors"
+	"github.com/tailor-platform/graphql/language/ast"
+	"github.com/tailor-platform/graphql/language/location"
+	"github.com/tailor-platform/graphql/testutil"
 )
 
 var testComplexScalar *graphql.Scalar = graphql.NewScalar(graphql.ScalarConfig{

@@ -9,7 +9,7 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/tailor-inc/graphql/language/ast"
+	"github.com/tailor-platform/graphql/language/ast"
 )
 
 // As per the GraphQL Spec, Integers are only treated as valid when a valid

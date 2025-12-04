@@ -1,7 +1,7 @@
 package ast
 
 import (
-	"github.com/tailor-inc/graphql/language/kinds"
+	"github.com/tailor-platform/graphql/language/kinds"
 )
 
 type Selection interface {

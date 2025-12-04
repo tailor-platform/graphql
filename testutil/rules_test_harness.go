@@ -3,11 +3,11 @@ package testutil
 import (
 	"testing"
 
-	"github.com/tailor-inc/graphql"
-	"github.com/tailor-inc/graphql/gqlerrors"
-	"github.com/tailor-inc/graphql/language/location"
-	"github.com/tailor-inc/graphql/language/parser"
-	"github.com/tailor-inc/graphql/language/source"
+	"github.com/tailor-platform/graphql"
+	"github.com/tailor-platform/graphql/gqlerrors"
+	"github.com/tailor-platform/graphql/language/location"
+	"github.com/tailor-platform/graphql/language/parser"
+	"github.com/tailor-platform/graphql/language/source"
 )
 
 var TestSchema *graphql.Schema

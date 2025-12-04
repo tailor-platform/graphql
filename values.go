@@ -8,10 +8,10 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/tailor-inc/graphql/gqlerrors"
-	"github.com/tailor-inc/graphql/language/ast"
-	"github.com/tailor-inc/graphql/language/kinds"
-	"github.com/tailor-inc/graphql/language/printer"
+	"github.com/tailor-platform/graphql/gqlerrors"
+	"github.com/tailor-platform/graphql/language/ast"
+	"github.com/tailor-platform/graphql/language/kinds"
+	"github.com/tailor-platform/graphql/language/printer"
 )
 
 // Prepares an object map of variableValues of the correct type based on the

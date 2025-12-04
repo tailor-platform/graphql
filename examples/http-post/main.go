@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"net/http"
 
-	"github.com/tailor-inc/graphql"
-	"github.com/tailor-inc/graphql/examples/todo/schema"
+	"github.com/tailor-platform/graphql"
+	"github.com/tailor-platform/graphql/examples/todo/schema"
 )
 
 type postData struct {
