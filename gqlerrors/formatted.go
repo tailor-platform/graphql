@@ -67,3 +67,33 @@ func FormatErrors(errs ...error) []FormattedError {
 	}
 	return formattedErrors
 }
+
+func FormatErrorsFromError(err error) []FormattedError {
+	gqlErr, isGqlErr := err.(*Error)
+
+	if isGqlErr && gqlErr.OriginalError != nil {
+		if unwrapper, ok := gqlErr.OriginalError.(interface{ Unwrap() []error }); ok {
+			var result []FormattedError
+			for _, e := range unwrapper.Unwrap() {
+				newErr := &Error{
+					Message:       e.Error(),
+					Locations:     gqlErr.Locations,
+					Path:          gqlErr.Path,
+					OriginalError: e,
+				}
+				result = append(result, FormatErrorsFromError(newErr)...)
+			}
+			return result
+		}
+	}
+
+	if unwrapper, ok := err.(interface{ Unwrap() []error }); ok {
+		var result []FormattedError
+		for _, e := range unwrapper.Unwrap() {
+			result = append(result, FormatErrorsFromError(e)...)
+		}
+		return result
+	}
+
+	return []FormattedError{FormatError(err)}
+}
