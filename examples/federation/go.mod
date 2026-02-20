@@ -42,7 +42,7 @@ require (
 	github.com/nats-io/nuid v1.0.1 // indirect
 	github.com/r3labs/sse/v2 v2.8.1 // indirect
 	github.com/santhosh-tekuri/jsonschema/v5 v5.3.0 // indirect
-	github.com/sirupsen/logrus v1.8.1 // indirect
+	github.com/sirupsen/logrus v1.8.3 // indirect
 	github.com/tidwall/gjson v1.11.0 // indirect
 	github.com/tidwall/match v1.1.1 // indirect
 	github.com/tidwall/pretty v1.2.0 // indirect
