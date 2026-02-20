@@ -586,7 +586,7 @@ func handleFieldError(r interface{}, fieldNodes []ast.Node, path *ResponsePath, 
 	if _, ok := returnType.(*NonNull); ok {
 		panic(err)
 	}
-	eCtx.Errors = append(eCtx.Errors, gqlerrors.FormatError(err))
+	eCtx.Errors = append(eCtx.Errors, gqlerrors.FormatErrorsFromError(err)...)
 }
 
 // Resolves the field on the given source object. In particular, this
