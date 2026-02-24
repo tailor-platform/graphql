@@ -2470,3 +2470,98 @@ func TestQuery_NestedJoinedErrors(t *testing.T) {
 		}
 	}
 }
+
+type pathError struct {
+	msg  string
+	path []interface{}
+}
+
+func (e *pathError) Error() string       { return e.msg }
+func (e *pathError) Path() []interface{} { return e.path }
+
+func TestQuery_CustomPathError(t *testing.T) {
+	customPath := []interface{}{"custom", "path", "to", "field"}
+	result := testErrors(t, graphql.String, nil, func(err error) error {
+		return &pathError{msg: err.Error(), path: customPath}
+	})
+
+	if len(result.Errors) != 1 {
+		t.Fatalf("expected 1 error, got %d: %+v", len(result.Errors), result.Errors)
+	}
+
+	if !reflect.DeepEqual(result.Errors[0].Path, customPath) {
+		t.Errorf("expected path %v, got %v", customPath, result.Errors[0].Path)
+	}
+}
+
+type pathAndExtendedError struct {
+	msg        string
+	path       []interface{}
+	extensions map[string]interface{}
+}
+
+func (e *pathAndExtendedError) Error() string                      { return e.msg }
+func (e *pathAndExtendedError) Path() []interface{}                { return e.path }
+func (e *pathAndExtendedError) Extensions() map[string]interface{} { return e.extensions }
+
+func TestQuery_PathErrorWithExtensions(t *testing.T) {
+	customPath := []interface{}{"input", "name"}
+	customExtensions := map[string]interface{}{"code": "VALIDATION_ERROR"}
+
+	result := testErrors(t, graphql.String, nil, func(err error) error {
+		return &pathAndExtendedError{
+			msg:        err.Error(),
+			path:       customPath,
+			extensions: customExtensions,
+		}
+	})
+
+	if len(result.Errors) != 1 {
+		t.Fatalf("expected 1 error, got %d: %+v", len(result.Errors), result.Errors)
+	}
+
+	if !reflect.DeepEqual(result.Errors[0].Path, customPath) {
+		t.Errorf("expected path %v, got %v", customPath, result.Errors[0].Path)
+	}
+
+	if !reflect.DeepEqual(result.Errors[0].Extensions, customExtensions) {
+		t.Errorf("expected extensions %v, got %v", customExtensions, result.Errors[0].Extensions)
+	}
+}
+
+func TestQuery_MultipleErrorsWithCustomPaths(t *testing.T) {
+	path1 := []interface{}{"input", "name"}
+	path2 := []interface{}{"input", "age"}
+
+	result := testErrors(t, graphql.String, nil, func(err error) error {
+		err1 := &pathError{msg: "name is required", path: path1}
+		err2 := &pathError{msg: "age must be positive", path: path2}
+		return errors.Join(err1, err2)
+	})
+
+	if len(result.Errors) != 2 {
+		t.Fatalf("expected 2 errors, got %d: %+v", len(result.Errors), result.Errors)
+	}
+
+	if !reflect.DeepEqual(result.Errors[0].Path, path1) {
+		t.Errorf("error[0]: expected path %v, got %v", path1, result.Errors[0].Path)
+	}
+
+	if !reflect.DeepEqual(result.Errors[1].Path, path2) {
+		t.Errorf("error[1]: expected path %v, got %v", path2, result.Errors[1].Path)
+	}
+}
+
+func TestQuery_PathErrorReturnsNil(t *testing.T) {
+	result := testErrors(t, graphql.String, nil, func(err error) error {
+		return &pathError{msg: err.Error(), path: nil}
+	})
+
+	if len(result.Errors) != 1 {
+		t.Fatalf("expected 1 error, got %d: %+v", len(result.Errors), result.Errors)
+	}
+
+	if result.Errors[0].Path != nil {
+		t.Errorf("expected path to be nil, got %v", result.Errors[0].Path)
+	}
+}
