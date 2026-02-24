@@ -2414,3 +2414,59 @@ func TestQuery_OriginalErrorPanic(t *testing.T) {
 		t.Fatalf("unexpected error: %v", reflect.TypeOf(err))
 	}
 }
+
+func TestQuery_MultipleErrorsFromResolver(t *testing.T) {
+	result := testErrors(t, graphql.String, nil, func(err error) error {
+		return errors.Join(err, errors.New("second error"))
+	})
+
+	if len(result.Errors) != 2 {
+		t.Fatalf("expected 2 errors, got %d: %+v", len(result.Errors), result.Errors)
+	}
+
+	expectedMessages := []string{
+		"Name for character with ID 1002 could not be fetched.",
+		"second error",
+	}
+	for i, err := range result.Errors {
+		if err.Message != expectedMessages[i] {
+			t.Errorf("error[%d]: expected message %q, got %q", i, expectedMessages[i], err.Message)
+		}
+	}
+
+	expectedPath := []interface{}{"hero", "heroFriends", 1, "name"}
+	for i, err := range result.Errors {
+		if !reflect.DeepEqual(err.Path, expectedPath) {
+			t.Errorf("error[%d]: expected path %v, got %v", i, expectedPath, err.Path)
+		}
+	}
+}
+
+func TestQuery_NestedJoinedErrors(t *testing.T) {
+	result := testErrors(t, graphql.String, nil, func(err error) error {
+		nested := errors.Join(err, errors.New("second error"))
+		return errors.Join(nested, errors.New("third error"))
+	})
+
+	if len(result.Errors) != 3 {
+		t.Fatalf("expected 3 errors, got %d: %+v", len(result.Errors), result.Errors)
+	}
+
+	expectedMessages := []string{
+		"Name for character with ID 1002 could not be fetched.",
+		"second error",
+		"third error",
+	}
+	for i, err := range result.Errors {
+		if err.Message != expectedMessages[i] {
+			t.Errorf("error[%d]: expected message %q, got %q", i, expectedMessages[i], err.Message)
+		}
+	}
+
+	expectedPath := []interface{}{"hero", "heroFriends", 1, "name"}
+	for i, err := range result.Errors {
+		if !reflect.DeepEqual(err.Path, expectedPath) {
+			t.Errorf("error[%d]: expected path %v, got %v", i, expectedPath, err.Path)
+		}
+	}
+}
