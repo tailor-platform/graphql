@@ -2471,6 +2471,49 @@ func TestQuery_NestedJoinedErrors(t *testing.T) {
 	}
 }
 
+func TestQuery_MultipleErrorsFromResolverNonNull(t *testing.T) {
+	queryType := graphql.NewObject(graphql.ObjectConfig{
+		Name: "Query",
+		Fields: graphql.Fields{
+			"value": &graphql.Field{
+				Type: graphql.NewNonNull(graphql.Int), // NonNull at top level
+				Resolve: func(p graphql.ResolveParams) (interface{}, error) {
+					return nil, errors.Join(
+						errors.New("first error"),
+						errors.New("second error"),
+					)
+				},
+			},
+		},
+	})
+
+	schema, err := graphql.NewSchema(graphql.SchemaConfig{
+		Query: queryType,
+	})
+	if err != nil {
+		t.Fatalf("failed to create schema: %v", err)
+	}
+
+	result := graphql.Do(graphql.Params{
+		Schema:        schema,
+		RequestString: `{ value }`,
+	})
+
+	if len(result.Errors) != 2 {
+		t.Fatalf("expected 2 errors, got %d: %+v", len(result.Errors), result.Errors)
+	}
+
+	expectedMessages := []string{
+		"first error",
+		"second error",
+	}
+	for i, err := range result.Errors {
+		if err.Message != expectedMessages[i] {
+			t.Errorf("error[%d]: expected message %q, got %q", i, expectedMessages[i], err.Message)
+		}
+	}
+}
+
 type pathError struct {
 	msg  string
 	path []interface{}

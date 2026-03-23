@@ -54,7 +54,7 @@ func Execute(p ExecuteParams) (result *Result) {
 
 		defer func() {
 			if err := recover(); err != nil {
-				result.Errors = append(result.Errors, gqlerrors.FormatError(err.(error)))
+				result.Errors = append(result.Errors, gqlerrors.FormatErrorsFromError(err.(error))...)
 			}
 			resultChannel <- result
 		}()
