@@ -27,9 +27,12 @@ func getVariableValues(
 			continue
 		}
 		varName := defAST.Variable.Name.Value
-		if varValue, err := getVariableValue(schema, defAST, inputs[varName]); err != nil {
+		input, provided := inputs[varName]
+		varValue, err := getVariableValue(schema, defAST, input)
+		if err != nil {
 			return values, err
-		} else {
+		}
+		if provided || defAST.DefaultValue != nil {
 			values[varName] = varValue
 		}
 	}
@@ -50,26 +53,31 @@ func getArgumentValues(
 	}
 	results := map[string]interface{}{}
 	for _, argDef := range argDefs {
-		var (
-			tmp         interface{}
-			value       ast.Value
-			isUndefined bool
-		)
-		if tmpValue, ok := argASTMap[argDef.PrivateName]; ok {
-			value = tmpValue.Value
-		} else {
-			isUndefined = true
+		var value ast.Value
+		argAST, ok := argASTMap[argDef.PrivateName]
+		if ok {
+			value = argAST.Value
 		}
-		if tmp = valueFromAST(value, argDef.Type, variableValues); isNullish(tmp) {
+		isUndefined := !ok || isUnprovidedVariable(value, variableValues)
+		tmp := valueFromAST(value, argDef.Type, variableValues)
+		if isNullish(tmp) {
 			tmp = argDef.DefaultValue
 		}
-		if !isUndefined && tmp == nil {
-			results[argDef.PrivateName] = nil
-		} else if !isNullish(tmp) {
+		if !isUndefined || !isNullish(tmp) {
 			results[argDef.PrivateName] = tmp
 		}
 	}
 	return results
+}
+
+// Returns true if value is a reference to a variable the caller did not supply.
+func isUnprovidedVariable(value ast.Value, variables map[string]interface{}) bool {
+	v, ok := value.(*ast.Variable)
+	if !ok || v.Name == nil {
+		return false
+	}
+	_, provided := variables[v.Name.Value]
+	return !provided
 }
 
 // Given a variable definition, and any value of input, return a value which
@@ -381,16 +389,12 @@ func valueFromAST(valueAST ast.Value, ttype Input, variables map[string]interfac
 		}
 		return append(values, valueFromAST(valueAST, ttype.OfType, variables))
 	case *InputObject:
-		var (
-			ok bool
-			ov *ast.ObjectValue
-			of *ast.ObjectField
-		)
-		if ov, ok = valueAST.(*ast.ObjectValue); !ok {
+		ov, ok := valueAST.(*ast.ObjectValue)
+		if !ok {
 			return nil
 		}
 		fieldASTs := map[string]*ast.ObjectField{}
-		for _, of = range ov.Fields {
+		for _, of := range ov.Fields {
 			if of == nil || of.Name == nil {
 				continue
 			}
@@ -398,20 +402,12 @@ func valueFromAST(valueAST ast.Value, ttype Input, variables map[string]interfac
 		}
 		obj := map[string]interface{}{}
 		for name, field := range ttype.Fields() {
-			var (
-				value       interface{}
-				isUndefined bool
-			)
-			if of, ok = fieldASTs[name]; ok {
-				value = valueFromAST(of.Value, field.Type, variables)
-			} else {
-				isUndefined = true
-				value = field.DefaultValue
-			}
-			if !isUndefined && value == nil {
-				obj[name] = nil
-			} else if !isNullish(value) {
-				obj[name] = value
+			of, ok := fieldASTs[name]
+			supplied := ok && !isUnprovidedVariable(of.Value, variables)
+			if supplied {
+				obj[name] = valueFromAST(of.Value, field.Type, variables)
+			} else if !isNullish(field.DefaultValue) {
+				obj[name] = field.DefaultValue
 			}
 		}
 		return obj
