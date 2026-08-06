@@ -1271,7 +1271,7 @@ func ProvidedNonNullArgumentsRule(context *ValidationContext) *ValidationRuleIns
 						for _, argDef := range fieldDef.Args {
 							argAST, _ := argASTMap[argDef.Name()]
 							if argAST == nil {
-								if argDefType, ok := argDef.Type.(*NonNull); ok {
+								if argDefType, ok := argDef.Type.(*NonNull); ok && argDef.DefaultValue == nil {
 									fieldName := ""
 									if fieldAST.Name != nil {
 										fieldName = fieldAST.Name.Value
@@ -1312,7 +1312,7 @@ func ProvidedNonNullArgumentsRule(context *ValidationContext) *ValidationRuleIns
 						for _, argDef := range directiveDef.Args {
 							argAST, _ := argASTMap[argDef.Name()]
 							if argAST == nil {
-								if argDefType, ok := argDef.Type.(*NonNull); ok {
+								if argDefType, ok := argDef.Type.(*NonNull); ok && argDef.DefaultValue == nil {
 									directiveName := ""
 									if directiveAST.Name != nil {
 										directiveName = directiveAST.Name.Value

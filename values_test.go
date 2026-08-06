@@ -56,15 +56,24 @@ func Test_coerceValue(t *testing.T) {
 		},
 	}
 
+	// None of these cases involve a default value, so both coercion modes must
+	// agree on all of them.
 	for name, tc := range testCases {
 		name, tc := name, tc
-		t.Run(name, func(t *testing.T) {
-			t.Parallel()
-
-			got := coerceValue(tc.input.ttype, tc.input.value)
-			if !reflect.DeepEqual(tc.expected, got) {
-				t.Errorf("unexpected result, expected: %v, got: %v", tc.expected, got)
+		for _, specCompliant := range []bool{false, true} {
+			specCompliant := specCompliant
+			mode := "legacy"
+			if specCompliant {
+				mode = "spec"
 			}
-		})
+			t.Run(name+"/"+mode, func(t *testing.T) {
+				t.Parallel()
+
+				got := coerceValue(tc.input.ttype, tc.input.value, specCompliant)
+				if !reflect.DeepEqual(tc.expected, got) {
+					t.Errorf("unexpected result, expected: %v, got: %v", tc.expected, got)
+				}
+			})
+		}
 	}
 }
