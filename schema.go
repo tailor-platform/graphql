@@ -7,6 +7,23 @@ type SchemaConfig struct {
 	Types        []Type
 	Directives   []*Directive
 	Extensions   []Extension
+
+	// SpecCompliantArgumentCoercion opts this schema into the argument and
+	// variable coercion rules described by the GraphQL specification
+	// (CoerceArgumentValues §6.4.1, CoerceVariableValues §6.1.2 and input
+	// object coercion §3.10):
+	//
+	//   - A variable the caller did not supply leaves its argument absent from
+	//     ResolveParams.Args instead of materialising it as nil, so a resolver
+	//     can tell "not provided" from "explicitly null".
+	//   - A default value applies only when no value was supplied. An explicit
+	//     null stays null instead of falling back to the default.
+	//
+	// It is opt-in because both rules change what resolvers observe: code
+	// written against the previous behaviour may rely on every declared
+	// argument being present, or on an explicit null being replaced by the
+	// default. Leaving this false keeps that behaviour byte-for-byte.
+	SpecCompliantArgumentCoercion bool
 }
 
 type TypeMap map[string]Type
@@ -43,6 +60,8 @@ type Schema struct {
 	implementations  map[string][]*Object
 	possibleTypeMap  map[string]map[string]bool
 	extensions       []Extension
+
+	specCompliantArgumentCoercion bool
 }
 
 func NewSchema(config SchemaConfig) (Schema, error) {
@@ -65,6 +84,7 @@ func NewSchema(config SchemaConfig) (Schema, error) {
 	schema.queryType = config.Query
 	schema.mutationType = config.Mutation
 	schema.subscriptionType = config.Subscription
+	schema.specCompliantArgumentCoercion = config.SpecCompliantArgumentCoercion
 
 	// Provide specified directives (e.g. @include and @skip) by default.
 	schema.directives = config.Directives
@@ -208,6 +228,12 @@ func (gq *Schema) MutationType() *Object {
 
 func (gq *Schema) SubscriptionType() *Object {
 	return gq.subscriptionType
+}
+
+// SpecCompliantArgumentCoercion reports whether this schema coerces arguments
+// and variables by the specification's rules. See SchemaConfig for details.
+func (gq *Schema) SpecCompliantArgumentCoercion() bool {
+	return gq.specCompliantArgumentCoercion
 }
 
 func (gq *Schema) Directives() []*Directive {
