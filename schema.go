@@ -8,10 +8,10 @@ type SchemaConfig struct {
 	Directives   []*Directive
 	Extensions   []Extension
 
-	// SpecCompliantArgumentCoercion opts this schema into the argument and
-	// variable coercion rules described by the GraphQL specification
-	// (CoerceArgumentValues §6.4.1, CoerceVariableValues §6.1.2 and input
-	// object coercion §3.10):
+	// LegacyArgumentCoercion restores the argument and variable coercion
+	// behaviour of releases before the coercion fix. Leave it false: the zero
+	// value follows the GraphQL specification (CoerceArgumentValues §6.4.1,
+	// CoerceVariableValues §6.1.2 and input object coercion §3.10):
 	//
 	//   - A variable the caller did not supply leaves its argument absent from
 	//     ResolveParams.Args instead of materialising it as nil, so a resolver
@@ -19,11 +19,12 @@ type SchemaConfig struct {
 	//   - A default value applies only when no value was supplied. An explicit
 	//     null stays null instead of falling back to the default.
 	//
-	// It is opt-in because both rules change what resolvers observe: code
-	// written against the previous behaviour may rely on every declared
-	// argument being present, or on an explicit null being replaced by the
-	// default. Leaving this false keeps that behaviour byte-for-byte.
-	SpecCompliantArgumentCoercion bool
+	// Older releases collapsed both distinctions: every declared argument
+	// arrived present, and an explicit null was replaced by the default. Set
+	// this to true to keep that behaviour byte-for-byte while migrating code
+	// that depends on it. The switch exists only to ease that migration and is
+	// expected to be removed once no schema needs it.
+	LegacyArgumentCoercion bool
 }
 
 type TypeMap map[string]Type
@@ -84,7 +85,7 @@ func NewSchema(config SchemaConfig) (Schema, error) {
 	schema.queryType = config.Query
 	schema.mutationType = config.Mutation
 	schema.subscriptionType = config.Subscription
-	schema.specCompliantArgumentCoercion = config.SpecCompliantArgumentCoercion
+	schema.specCompliantArgumentCoercion = !config.LegacyArgumentCoercion
 
 	// Provide specified directives (e.g. @include and @skip) by default.
 	schema.directives = config.Directives
@@ -228,12 +229,6 @@ func (gq *Schema) MutationType() *Object {
 
 func (gq *Schema) SubscriptionType() *Object {
 	return gq.subscriptionType
-}
-
-// SpecCompliantArgumentCoercion reports whether this schema coerces arguments
-// and variables by the specification's rules. See SchemaConfig for details.
-func (gq *Schema) SpecCompliantArgumentCoercion() bool {
-	return gq.specCompliantArgumentCoercion
 }
 
 func (gq *Schema) Directives() []*Directive {

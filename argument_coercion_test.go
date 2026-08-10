@@ -178,16 +178,17 @@ var coercionProbeType = graphql.NewObject(graphql.ObjectConfig{
 	},
 })
 
-// The same probe types under both coercion modes. SpecCompliantArgumentCoercion
-// is opt-in, so the zero-valued config is the behaviour shipped before this
-// change and must stay byte-for-byte identical.
-var coercionProbeLegacySchema, _ = graphql.NewSchema(graphql.SchemaConfig{
+// The same probe types under both coercion modes. Spec-compliant coercion is
+// the default, so the zero-valued config exercises the fix;
+// LegacyArgumentCoercion opts back out and must reproduce the behaviour shipped
+// before this change byte-for-byte.
+var coercionProbeSpecSchema, _ = graphql.NewSchema(graphql.SchemaConfig{
 	Query: coercionProbeType,
 })
 
-var coercionProbeSpecSchema, _ = graphql.NewSchema(graphql.SchemaConfig{
-	Query:                         coercionProbeType,
-	SpecCompliantArgumentCoercion: true,
+var coercionProbeLegacySchema, _ = graphql.NewSchema(graphql.SchemaConfig{
+	Query:                  coercionProbeType,
+	LegacyArgumentCoercion: true,
 })
 
 func execProbe(t *testing.T, schema graphql.Schema, field, doc string, vars map[string]interface{}) string {
@@ -305,6 +306,14 @@ func TestArgumentCoercion_ArgumentDefault_AppliesOnlyWhenValueAbsent(t *testing.
 		runProbe(t, "probeArgDefault", doc,
 			map[string]interface{}{"a": "v"},
 			`{"a":"v","keys":["a"]}`)
+	})
+	// A literal the argument's type cannot parse is neither absent nor null. The
+	// specification calls for a field error (§6.4.1); this implementation has
+	// always fallen back to the default instead, and such a document fails
+	// validation anyway, so both modes keep that behaviour.
+	t.Run("literal cannot be parsed -> default in both modes", func(t *testing.T) {
+		runProbe(t, "probeArgDefault", `{ probeArgDefault(a: WRONG_TYPE) }`, nil,
+			`{"a":"ARGDEF","keys":["a"]}`)
 	})
 }
 
@@ -621,7 +630,7 @@ func TestArgumentCoercion_ListOfInputObjects_PreservesPerElementState(t *testing
 }
 
 // Spec §5.4.2.1, end to end through graphql.Do so document validation runs too.
-// This relaxation is not gated by SpecCompliantArgumentCoercion: it only lets
+// This relaxation is not affected by LegacyArgumentCoercion: it only lets
 // queries through that previously failed, so it cannot break a working one.
 func TestArgumentCoercion_NonNullArgumentWithDefault_IsOptionalInBothModes(t *testing.T) {
 	for _, tc := range []struct {

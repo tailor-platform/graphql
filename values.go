@@ -76,7 +76,12 @@ func getArgumentValues(
 		// does the default apply — an explicit null is a supplied value.
 		isUndefined := !ok || isUnprovidedVariable(value, variableValues)
 		tmp := valueFromAST(value, argDef.Type, variableValues, specCompliant)
-		if isUndefined && isNullish(tmp) {
+		// A literal the argument's type cannot parse also leaves tmp nullish. The
+		// specification calls for a field error there (CoerceArgumentValues
+		// §6.4.1); this implementation has always fallen back to the default
+		// instead, and such a document fails validation anyway, so that case is
+		// left as it is. Only a supplied null keeps its null.
+		if isNullish(tmp) && !isProvidedNullVariable(value, variableValues) {
 			tmp = argDef.DefaultValue
 		}
 		if !isUndefined || !isNullish(tmp) {
@@ -94,6 +99,17 @@ func isUnprovidedVariable(value ast.Value, variables map[string]interface{}) boo
 	}
 	_, provided := variables[v.Name.Value]
 	return !provided
+}
+
+// Returns true if value is a reference to a variable the caller supplied as
+// null. Such a null is a value of its own, so no default may stand in for it.
+func isProvidedNullVariable(value ast.Value, variables map[string]interface{}) bool {
+	v, ok := value.(*ast.Variable)
+	if !ok || v.Name == nil {
+		return false
+	}
+	supplied, provided := variables[v.Name.Value]
+	return provided && isNullish(supplied)
 }
 
 // Given a variable definition, and any value of input, return a value which
