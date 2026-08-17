@@ -498,13 +498,13 @@ func shouldIncludeNode(eCtx *executionContext, directives []*ast.Directive) bool
 	}
 	// precedence: skipAST > includeAST
 	if skipAST != nil {
-		argValues = getArgumentValues(SkipDirective.Args, skipAST.Arguments, eCtx.VariableValues, eCtx.Schema.specCompliantArgumentCoercion)
+		argValues = getArgumentValues(SkipDirective.Args, skipAST.Arguments, eCtx.VariableValues, eCtx.Schema.nonSpecArgumentHandling)
 		if skipIf, ok := argValues["if"].(bool); ok && skipIf {
 			return false // excluded selectionSet's fields
 		}
 	}
 	if includeAST != nil {
-		argValues = getArgumentValues(IncludeDirective.Args, includeAST.Arguments, eCtx.VariableValues, eCtx.Schema.specCompliantArgumentCoercion)
+		argValues = getArgumentValues(IncludeDirective.Args, includeAST.Arguments, eCtx.VariableValues, eCtx.Schema.nonSpecArgumentHandling)
 		if includeIf, ok := argValues["if"].(bool); ok && !includeIf {
 			return false // excluded selectionSet's fields
 		}
@@ -624,7 +624,7 @@ func resolveField(eCtx *executionContext, parentType *Object, source interface{}
 	// Build a map of arguments from the field.arguments AST, using the
 	// variables scope to fulfill any variable references.
 	// TODO: find a way to memoize, in case this field is within a List type.
-	args := getArgumentValues(fieldDef.Args, fieldAST.Arguments, eCtx.VariableValues, eCtx.Schema.specCompliantArgumentCoercion)
+	args := getArgumentValues(fieldDef.Args, fieldAST.Arguments, eCtx.VariableValues, eCtx.Schema.nonSpecArgumentHandling)
 
 	info := ResolveInfo{
 		FieldName:      fieldName,

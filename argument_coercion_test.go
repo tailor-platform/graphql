@@ -178,17 +178,17 @@ var coercionProbeType = graphql.NewObject(graphql.ObjectConfig{
 	},
 })
 
-// The same probe types under both coercion modes. Spec-compliant coercion is
-// the default, so the zero-valued config exercises the fix;
-// LegacyArgumentCoercion opts back out and must reproduce the behaviour shipped
-// before this change byte-for-byte.
+// The same probe types under both modes. Spec-compliant handling is the
+// default, so the zero-valued config exercises the fix;
+// NonSpecArgumentHandling opts back out and must reproduce the behaviour
+// shipped before this change byte-for-byte.
 var coercionProbeSpecSchema, _ = graphql.NewSchema(graphql.SchemaConfig{
 	Query: coercionProbeType,
 })
 
-var coercionProbeLegacySchema, _ = graphql.NewSchema(graphql.SchemaConfig{
-	Query:                  coercionProbeType,
-	LegacyArgumentCoercion: true,
+var coercionProbeNonSpecSchema, _ = graphql.NewSchema(graphql.SchemaConfig{
+	Query:                   coercionProbeType,
+	NonSpecArgumentHandling: true,
 })
 
 func execProbe(t *testing.T, schema graphql.Schema, field, doc string, vars map[string]interface{}) string {
@@ -214,12 +214,12 @@ func runProbe(t *testing.T, field, doc string, vars map[string]interface{}, want
 	runProbeModes(t, field, doc, vars, want, want)
 }
 
-// runProbeModes pins down a case where the flag changes the outcome: the legacy
-// column is the regression guard, the spec column is the fix.
-func runProbeModes(t *testing.T, field, doc string, vars map[string]interface{}, wantLegacy, wantSpec string) {
+// runProbeModes pins down a case where the flag changes the outcome: the
+// non-spec column is the regression guard, the spec column is the fix.
+func runProbeModes(t *testing.T, field, doc string, vars map[string]interface{}, wantNonSpec, wantSpec string) {
 	t.Helper()
-	if got := execProbe(t, coercionProbeLegacySchema, field, doc, vars); got != wantLegacy {
-		t.Errorf("legacy mode mismatch\n  got:  %s\n  want: %s", got, wantLegacy)
+	if got := execProbe(t, coercionProbeNonSpecSchema, field, doc, vars); got != wantNonSpec {
+		t.Errorf("non-spec mode mismatch\n  got:  %s\n  want: %s", got, wantNonSpec)
 	}
 	if got := execProbe(t, coercionProbeSpecSchema, field, doc, vars); got != wantSpec {
 		t.Errorf("spec mode mismatch\n  got:  %s\n  want: %s", got, wantSpec)
@@ -630,30 +630,40 @@ func TestArgumentCoercion_ListOfInputObjects_PreservesPerElementState(t *testing
 }
 
 // Spec §5.4.2.1, end to end through graphql.Do so document validation runs too.
-// This relaxation is not affected by LegacyArgumentCoercion: it only lets
-// queries through that previously failed, so it cannot break a working one.
-func TestArgumentCoercion_NonNullArgumentWithDefault_IsOptionalInBothModes(t *testing.T) {
-	for _, tc := range []struct {
-		mode   string
-		schema graphql.Schema
-	}{
-		{"legacy", coercionProbeLegacySchema},
-		{"spec", coercionProbeSpecSchema},
-	} {
-		t.Run(tc.mode, func(t *testing.T) {
-			result := graphql.Do(graphql.Params{
-				Schema:        tc.schema,
-				RequestString: `{ probeNonNullDefault }`,
-			})
-			if len(result.Errors) > 0 {
-				t.Fatalf("unexpected errors: %v", result.Errors)
-			}
-			data, _ := result.Data.(map[string]interface{})
-			got, _ := data["probeNonNullDefault"].(string)
-			want := `{"a":"NNDEF","keys":["a"]}`
-			if got != want {
-				t.Fatalf("probe mismatch\n  got:  %s\n  want: %s", got, want)
-			}
-		})
+// A non-null argument carrying a default is optional, so omitting it validates
+// and resolves to the default.
+func TestArgumentCoercion_NonNullArgumentWithDefault_IsOptionalInSpecMode(t *testing.T) {
+	result := graphql.Do(graphql.Params{
+		Schema:        coercionProbeSpecSchema,
+		RequestString: `{ probeNonNullDefault }`,
+	})
+	if len(result.Errors) > 0 {
+		t.Fatalf("unexpected errors: %v", result.Errors)
+	}
+	data, _ := result.Data.(map[string]interface{})
+	got, _ := data["probeNonNullDefault"].(string)
+	want := `{"a":"NNDEF","keys":["a"]}`
+	if got != want {
+		t.Fatalf("probe mismatch\n  got:  %s\n  want: %s", got, want)
+	}
+}
+
+// The stricter reading of §5.4.2.1 is part of what NonSpecArgumentHandling
+// restores: a schema that opts out treats every non-null argument as required,
+// so the same document fails validation instead of reaching a resolver.
+func TestArgumentCoercion_NonNullArgumentWithDefault_IsRequiredInNonSpecMode(t *testing.T) {
+	result := graphql.Do(graphql.Params{
+		Schema:        coercionProbeNonSpecSchema,
+		RequestString: `{ probeNonNullDefault }`,
+	})
+	if len(result.Errors) != 1 {
+		t.Fatalf("expected exactly one validation error, got: %v", result.Errors)
+	}
+	want := `Field "probeNonNullDefault" argument "a" of type "String!" is required but not provided.`
+	if got := result.Errors[0].Message; got != want {
+		t.Fatalf("error mismatch\n  got:  %s\n  want: %s", got, want)
+	}
+	if result.Data != nil {
+		t.Fatalf("expected no data on a validation failure, got: %v", result.Data)
 	}
 }

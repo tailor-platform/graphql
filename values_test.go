@@ -60,16 +60,16 @@ func Test_coerceValue(t *testing.T) {
 	// agree on all of them.
 	for name, tc := range testCases {
 		name, tc := name, tc
-		for _, specCompliant := range []bool{false, true} {
-			specCompliant := specCompliant
-			mode := "legacy"
-			if specCompliant {
-				mode = "spec"
+		for _, nonSpec := range []bool{false, true} {
+			nonSpec := nonSpec
+			mode := "spec"
+			if nonSpec {
+				mode = "nonSpec"
 			}
 			t.Run(name+"/"+mode, func(t *testing.T) {
 				t.Parallel()
 
-				got := coerceValue(tc.input.ttype, tc.input.value, specCompliant)
+				got := coerceValue(tc.input.ttype, tc.input.value, nonSpec)
 				if !reflect.DeepEqual(tc.expected, got) {
 					t.Errorf("unexpected result, expected: %v, got: %v", tc.expected, got)
 				}

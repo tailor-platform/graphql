@@ -1247,6 +1247,12 @@ func PossibleFragmentSpreadsRule(context *ValidationContext) *ValidationRuleInst
 // have been provided.
 func ProvidedNonNullArgumentsRule(context *ValidationContext) *ValidationRuleInstance {
 
+	// Spec §5.4.2.1: an argument is required only when its type is non-null and
+	// it declares no default value. A schema that opted into
+	// NonSpecArgumentHandling keeps the older, stricter reading, under which
+	// every non-null argument is required whether or not it has a default.
+	nonSpec := context.Schema().nonSpecArgumentHandling
+
 	visitorOpts := &visitor.VisitorOptions{
 		KindFuncMap: map[string]visitor.NamedVisitFuncs{
 			kinds.Field: {
@@ -1271,7 +1277,7 @@ func ProvidedNonNullArgumentsRule(context *ValidationContext) *ValidationRuleIns
 						for _, argDef := range fieldDef.Args {
 							argAST, _ := argASTMap[argDef.Name()]
 							if argAST == nil {
-								if argDefType, ok := argDef.Type.(*NonNull); ok && argDef.DefaultValue == nil {
+								if argDefType, ok := argDef.Type.(*NonNull); ok && (nonSpec || argDef.DefaultValue == nil) {
 									fieldName := ""
 									if fieldAST.Name != nil {
 										fieldName = fieldAST.Name.Value
@@ -1312,7 +1318,7 @@ func ProvidedNonNullArgumentsRule(context *ValidationContext) *ValidationRuleIns
 						for _, argDef := range directiveDef.Args {
 							argAST, _ := argASTMap[argDef.Name()]
 							if argAST == nil {
-								if argDefType, ok := argDef.Type.(*NonNull); ok && argDef.DefaultValue == nil {
+								if argDefType, ok := argDef.Type.(*NonNull); ok && (nonSpec || argDef.DefaultValue == nil) {
 									directiveName := ""
 									if directiveAST.Name != nil {
 										directiveName = directiveAST.Name.Value

@@ -32,7 +32,7 @@ func getVariableValues(
 		if err != nil {
 			return values, err
 		}
-		if !schema.specCompliantArgumentCoercion || provided || defAST.DefaultValue != nil {
+		if schema.nonSpecArgumentHandling || provided || defAST.DefaultValue != nil {
 			values[varName] = varValue
 		}
 	}
@@ -43,7 +43,7 @@ func getVariableValues(
 // definitions and list of argument AST nodes.
 func getArgumentValues(
 	argDefs []*Argument, argASTs []*ast.Argument,
-	variableValues map[string]interface{}, specCompliant bool) map[string]interface{} {
+	variableValues map[string]interface{}, nonSpec bool) map[string]interface{} {
 
 	argASTMap := map[string]*ast.Argument{}
 	for _, argAST := range argASTs {
@@ -58,9 +58,9 @@ func getArgumentValues(
 		if ok {
 			value = argAST.Value
 		}
-		if !specCompliant {
+		if nonSpec {
 			isUndefined := !ok
-			tmp := valueFromAST(value, argDef.Type, variableValues, specCompliant)
+			tmp := valueFromAST(value, argDef.Type, variableValues, nonSpec)
 			if isNullish(tmp) {
 				tmp = argDef.DefaultValue
 			}
@@ -75,7 +75,7 @@ func getArgumentValues(
 		// when it references a variable the caller did not supply. Only then
 		// does the default apply — an explicit null is a supplied value.
 		isUndefined := !ok || isUnprovidedVariable(value, variableValues)
-		tmp := valueFromAST(value, argDef.Type, variableValues, specCompliant)
+		tmp := valueFromAST(value, argDef.Type, variableValues, nonSpec)
 		// A literal the argument's type cannot parse also leaves tmp nullish. The
 		// specification calls for a field error there (CoerceArgumentValues
 		// §6.4.1); this implementation has always fallen back to the default
@@ -115,7 +115,7 @@ func isProvidedNullVariable(value ast.Value, variables map[string]interface{}) b
 // Given a variable definition, and any value of input, return a value which
 // adheres to the variable definition, or throw an error.
 func getVariableValue(schema Schema, definitionAST *ast.VariableDefinition, input interface{}, provided bool) (interface{}, error) {
-	specCompliant := schema.specCompliantArgumentCoercion
+	nonSpec := schema.nonSpecArgumentHandling
 	ttype, err := typeFromAST(schema, definitionAST.Type)
 	if err != nil {
 		return nil, err
@@ -137,14 +137,14 @@ func getVariableValue(schema Schema, definitionAST *ast.VariableDefinition, inpu
 	isValid, messages := isValidInputValue(input, ttype)
 	if isValid {
 		if isNullish(input) {
-			// The default stands in for a value the caller did not supply. In
-			// spec-compliant mode an explicitly supplied null is a value, so it
-			// must not be replaced by the default.
-			if definitionAST.DefaultValue != nil && !(specCompliant && provided) {
-				return valueFromAST(definitionAST.DefaultValue, ttype, nil, specCompliant), nil
+			// The default stands in for a value the caller did not supply. By the
+			// specification an explicitly supplied null is a value, so it must not
+			// be replaced by the default.
+			if definitionAST.DefaultValue != nil && (nonSpec || !provided) {
+				return valueFromAST(definitionAST.DefaultValue, ttype, nil, nonSpec), nil
 			}
 		}
-		return coerceValue(ttype, input, specCompliant), nil
+		return coerceValue(ttype, input, nonSpec), nil
 	}
 	if isNullish(input) {
 		return "", gqlerrors.NewError(
@@ -179,24 +179,24 @@ func getVariableValue(schema Schema, definitionAST *ast.VariableDefinition, inpu
 }
 
 // Given a type and any value, return a runtime value coerced to match the type.
-func coerceValue(ttype Input, value interface{}, specCompliant bool) interface{} {
+func coerceValue(ttype Input, value interface{}, nonSpec bool) interface{} {
 	if isNullish(value) {
 		return nil
 	}
 	switch ttype := ttype.(type) {
 	case *NonNull:
-		return coerceValue(ttype.OfType, value, specCompliant)
+		return coerceValue(ttype.OfType, value, nonSpec)
 	case *List:
 		var values = []interface{}{}
 		valType := reflect.ValueOf(value)
 		if valType.Kind() == reflect.Slice {
 			for i := 0; i < valType.Len(); i++ {
 				val := valType.Index(i).Interface()
-				values = append(values, coerceValue(ttype.OfType, val, specCompliant))
+				values = append(values, coerceValue(ttype.OfType, val, nonSpec))
 			}
 			return values
 		}
-		return append(values, coerceValue(ttype.OfType, value, specCompliant))
+		return append(values, coerceValue(ttype.OfType, value, nonSpec))
 	case *InputObject:
 		var obj = map[string]interface{}{}
 		valueMap, _ := value.(map[string]interface{})
@@ -211,11 +211,11 @@ func coerceValue(ttype Input, value interface{}, specCompliant bool) interface{}
 			}
 			// The key is present and holds null: the caller supplied a value, so
 			// the field's default must not stand in for it.
-			if specCompliant && ok && isNullish(v) {
+			if !nonSpec && ok && isNullish(v) {
 				obj[name] = nil
 				continue
 			}
-			fieldValue := coerceValue(field.Type, v, specCompliant)
+			fieldValue := coerceValue(field.Type, v, nonSpec)
 			if isNullish(fieldValue) {
 				fieldValue = field.DefaultValue
 			}
@@ -404,7 +404,7 @@ func isIterable(src interface{}) bool {
  * | Int / Float          | Number        |
  *
  */
-func valueFromAST(valueAST ast.Value, ttype Input, variables map[string]interface{}, specCompliant bool) interface{} {
+func valueFromAST(valueAST ast.Value, ttype Input, variables map[string]interface{}, nonSpec bool) interface{} {
 	if valueAST == nil {
 		return nil
 	}
@@ -420,16 +420,16 @@ func valueFromAST(valueAST ast.Value, ttype Input, variables map[string]interfac
 	}
 	switch ttype := ttype.(type) {
 	case *NonNull:
-		return valueFromAST(valueAST, ttype.OfType, variables, specCompliant)
+		return valueFromAST(valueAST, ttype.OfType, variables, nonSpec)
 	case *List:
 		values := []interface{}{}
 		if valueAST, ok := valueAST.(*ast.ListValue); ok {
 			for _, itemAST := range valueAST.Values {
-				values = append(values, valueFromAST(itemAST, ttype.OfType, variables, specCompliant))
+				values = append(values, valueFromAST(itemAST, ttype.OfType, variables, nonSpec))
 			}
 			return values
 		}
-		return append(values, valueFromAST(valueAST, ttype.OfType, variables, specCompliant))
+		return append(values, valueFromAST(valueAST, ttype.OfType, variables, nonSpec))
 	case *InputObject:
 		ov, ok := valueAST.(*ast.ObjectValue)
 		if !ok {
@@ -445,10 +445,10 @@ func valueFromAST(valueAST ast.Value, ttype Input, variables map[string]interfac
 		obj := map[string]interface{}{}
 		for name, field := range ttype.Fields() {
 			of, ok := fieldASTs[name]
-			if !specCompliant {
+			if nonSpec {
 				var value interface{}
 				if ok {
-					value = valueFromAST(of.Value, field.Type, variables, specCompliant)
+					value = valueFromAST(of.Value, field.Type, variables, nonSpec)
 				} else {
 					value = field.DefaultValue
 				}
@@ -464,7 +464,7 @@ func valueFromAST(valueAST ast.Value, ttype Input, variables map[string]interfac
 			// default must not stand in for it.
 			supplied := ok && !isUnprovidedVariable(of.Value, variables)
 			if supplied {
-				obj[name] = valueFromAST(of.Value, field.Type, variables, specCompliant)
+				obj[name] = valueFromAST(of.Value, field.Type, variables, nonSpec)
 			} else if !isNullish(field.DefaultValue) {
 				obj[name] = field.DefaultValue
 			}

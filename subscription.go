@@ -166,7 +166,7 @@ func ExecuteSubscription(p ExecuteParams) chan *Result {
 			Key: responseName,
 		}
 
-		args := getArgumentValues(fieldDef.Args, fieldNode.Arguments, exeContext.VariableValues, exeContext.Schema.specCompliantArgumentCoercion)
+		args := getArgumentValues(fieldDef.Args, fieldNode.Arguments, exeContext.VariableValues, exeContext.Schema.nonSpecArgumentHandling)
 		info := ResolveInfo{
 			FieldName:      fieldName,
 			FieldASTs:      fieldNodes,

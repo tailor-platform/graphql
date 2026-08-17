@@ -176,10 +176,10 @@ func TestValidate_ProvidedNonNullArguments_DirectiveArguments_WithDirectiveWithM
 	})
 }
 
-// Spec §5.4.2.1: "An argument is required if the argument type is non-null and
-// does not have a default value. Otherwise, the argument is optional."
-// See graphql-go/graphql#739.
-func TestValidate_ProvidedNonNullArguments_FieldArguments_NoErrorOnNonNullArgumentWithDefaultValue(t *testing.T) {
+// One field whose non-null argument declares a default value, under whichever
+// mode the caller asks for.
+func nonNullArgWithDefaultSchema(t *testing.T, nonSpec bool) graphql.Schema {
+	t.Helper()
 	schema, err := graphql.NewSchema(graphql.SchemaConfig{
 		Query: graphql.NewObject(graphql.ObjectConfig{
 			Name: "Query",
@@ -195,15 +195,37 @@ func TestValidate_ProvidedNonNullArguments_FieldArguments_NoErrorOnNonNullArgume
 				},
 			},
 		}),
+		NonSpecArgumentHandling: nonSpec,
 	})
 	if err != nil {
 		t.Fatalf("Unexpected error, got: %v", err)
 	}
+	return schema
+}
+
+// Spec §5.4.2.1: "An argument is required if the argument type is non-null and
+// does not have a default value. Otherwise, the argument is optional."
+// See graphql-go/graphql#739.
+func TestValidate_ProvidedNonNullArguments_FieldArguments_NoErrorOnNonNullArgumentWithDefaultValue(t *testing.T) {
+	schema := nonNullArgWithDefaultSchema(t, false)
 	testutil.ExpectPassesRuleWithSchema(t, &schema, graphql.ProvidedNonNullArgumentsRule, `
         {
           fieldWithDefault
         }
     `)
+}
+
+// NonSpecArgumentHandling restores the older, stricter reading, under which a
+// non-null argument is required whether or not it declares a default.
+func TestValidate_ProvidedNonNullArguments_FieldArguments_NonSpecErrorsOnNonNullArgumentWithDefaultValue(t *testing.T) {
+	schema := nonNullArgWithDefaultSchema(t, true)
+	testutil.ExpectFailsRuleWithSchema(t, &schema, graphql.ProvidedNonNullArgumentsRule, `
+        {
+          fieldWithDefault
+        }
+    `, []gqlerrors.FormattedError{
+		testutil.RuleError(`Field "fieldWithDefault" argument "arg" of type "Boolean!" is required but not provided.`, 3, 11),
+	})
 }
 
 func TestValidate_ProvidedNonNullArguments_FieldArguments_StillErrorsOnNonNullArgumentWithoutDefaultValue(t *testing.T) {
@@ -234,7 +256,10 @@ func TestValidate_ProvidedNonNullArguments_FieldArguments_StillErrorsOnNonNullAr
 	})
 }
 
-func TestValidate_ProvidedNonNullArguments_DirectiveArguments_NoErrorOnNonNullArgumentWithDefaultValue(t *testing.T) {
+// One directive whose non-null argument declares a default value, under
+// whichever mode the caller asks for.
+func nonNullDirectiveArgWithDefaultSchema(t *testing.T, nonSpec bool) graphql.Schema {
+	t.Helper()
 	deferDirective := graphql.NewDirective(graphql.DirectiveConfig{
 		Name: "defer",
 		Locations: []string{
@@ -255,11 +280,17 @@ func TestValidate_ProvidedNonNullArguments_DirectiveArguments_NoErrorOnNonNullAr
 				"a": &graphql.Field{Type: graphql.String},
 			},
 		}),
-		Directives: []*graphql.Directive{deferDirective},
+		Directives:              []*graphql.Directive{deferDirective},
+		NonSpecArgumentHandling: nonSpec,
 	})
 	if err != nil {
 		t.Fatalf("Unexpected error, got: %v", err)
 	}
+	return schema
+}
+
+func TestValidate_ProvidedNonNullArguments_DirectiveArguments_NoErrorOnNonNullArgumentWithDefaultValue(t *testing.T) {
+	schema := nonNullDirectiveArgWithDefaultSchema(t, false)
 	testutil.ExpectPassesRuleWithSchema(t, &schema, graphql.ProvidedNonNullArgumentsRule, `
         {
           ... on Query @defer {
@@ -267,4 +298,17 @@ func TestValidate_ProvidedNonNullArguments_DirectiveArguments_NoErrorOnNonNullAr
           }
         }
     `)
+}
+
+func TestValidate_ProvidedNonNullArguments_DirectiveArguments_NonSpecErrorsOnNonNullArgumentWithDefaultValue(t *testing.T) {
+	schema := nonNullDirectiveArgWithDefaultSchema(t, true)
+	testutil.ExpectFailsRuleWithSchema(t, &schema, graphql.ProvidedNonNullArgumentsRule, `
+        {
+          ... on Query @defer {
+            a
+          }
+        }
+    `, []gqlerrors.FormattedError{
+		testutil.RuleError(`Directive "@defer" argument "if" of type "Boolean!" is required but not provided.`, 3, 24),
+	})
 }
