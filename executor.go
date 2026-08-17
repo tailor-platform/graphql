@@ -481,10 +481,7 @@ func collectFields(p collectFieldsParams) (fields map[string][]*ast.Field) {
 // Determines if a field should be included based on the @include and @skip
 // directives, where @skip has higher precedence than @include.
 func shouldIncludeNode(eCtx *executionContext, directives []*ast.Directive) bool {
-	var (
-		skipAST, includeAST *ast.Directive
-		argValues           map[string]interface{}
-	)
+	var skipAST, includeAST *ast.Directive
 	for _, directive := range directives {
 		if directive == nil || directive.Name == nil {
 			continue
@@ -498,13 +495,24 @@ func shouldIncludeNode(eCtx *executionContext, directives []*ast.Directive) bool
 	}
 	// precedence: skipAST > includeAST
 	if skipAST != nil {
-		argValues = getArgumentValues(SkipDirective.Args, skipAST.Arguments, eCtx.VariableValues, eCtx.Schema.nonSpecArgumentHandling)
+		argValues, err := getArgumentValues(SkipDirective.Args, skipAST.Arguments, eCtx.VariableValues, eCtx.Schema.nonSpecArgumentHandling)
+		if err != nil {
+			// @skip declares "if: Boolean!" with no default, so a null can only get
+			// here if both variable coercion and validation let it through. Record
+			// the error rather than dropping it, and leave the node out.
+			eCtx.Errors = append(eCtx.Errors, gqlerrors.FormatErrorsFromError(err)...)
+			return false // excluded selectionSet's fields
+		}
 		if skipIf, ok := argValues["if"].(bool); ok && skipIf {
 			return false // excluded selectionSet's fields
 		}
 	}
 	if includeAST != nil {
-		argValues = getArgumentValues(IncludeDirective.Args, includeAST.Arguments, eCtx.VariableValues, eCtx.Schema.nonSpecArgumentHandling)
+		argValues, err := getArgumentValues(IncludeDirective.Args, includeAST.Arguments, eCtx.VariableValues, eCtx.Schema.nonSpecArgumentHandling)
+		if err != nil {
+			eCtx.Errors = append(eCtx.Errors, gqlerrors.FormatErrorsFromError(err)...)
+			return false // excluded selectionSet's fields
+		}
 		if includeIf, ok := argValues["if"].(bool); ok && !includeIf {
 			return false // excluded selectionSet's fields
 		}
@@ -624,7 +632,12 @@ func resolveField(eCtx *executionContext, parentType *Object, source interface{}
 	// Build a map of arguments from the field.arguments AST, using the
 	// variables scope to fulfill any variable references.
 	// TODO: find a way to memoize, in case this field is within a List type.
-	args := getArgumentValues(fieldDef.Args, fieldAST.Arguments, eCtx.VariableValues, eCtx.Schema.nonSpecArgumentHandling)
+	args, argErr := getArgumentValues(fieldDef.Args, fieldAST.Arguments, eCtx.VariableValues, eCtx.Schema.nonSpecArgumentHandling)
+	if argErr != nil {
+		// Same idiom as a failing resolver below: the deferred recover turns this
+		// into a field error via handleFieldError.
+		panic(argErr)
+	}
 
 	info := ResolveInfo{
 		FieldName:      fieldName,

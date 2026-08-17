@@ -77,3 +77,36 @@ func Test_coerceValue(t *testing.T) {
 		}
 	}
 }
+
+// Spec §3.10 / §5.6.4: an input field is required only when its type is non-null
+// AND it declares no default value. Pinned at the function level so the three
+// states stay distinct: absent-with-default, absent-without-default, explicit null.
+func Test_isValidInputValue_NonNullFieldWithDefault(t *testing.T) {
+	withDefault := NewInputObject(InputObjectConfig{
+		Name: "WithDefault",
+		Fields: InputObjectConfigFieldMap{
+			"a": &InputObjectFieldConfig{Type: NewNonNull(String), DefaultValue: "FIELDDEF"},
+		},
+	})
+	withoutDefault := NewInputObject(InputObjectConfig{
+		Name: "WithoutDefault",
+		Fields: InputObjectConfigFieldMap{
+			"a": &InputObjectFieldConfig{Type: NewNonNull(String)},
+		},
+	})
+
+	if isValid, messages := isValidInputValue(map[string]interface{}{}, withDefault, false); !isValid {
+		t.Errorf("spec mode: expected an omitted field with a default to be valid, got: %v", messages)
+	}
+	if isValid, _ := isValidInputValue(map[string]interface{}{}, withDefault, true); isValid {
+		t.Error("non-spec mode: expected an omitted non-null field to be invalid")
+	}
+	for _, nonSpec := range []bool{false, true} {
+		if isValid, _ := isValidInputValue(map[string]interface{}{"a": nil}, withDefault, nonSpec); isValid {
+			t.Errorf("expected an explicit null to be invalid (nonSpec=%v)", nonSpec)
+		}
+		if isValid, _ := isValidInputValue(map[string]interface{}{}, withoutDefault, nonSpec); isValid {
+			t.Errorf("expected an omitted field without a default to be invalid (nonSpec=%v)", nonSpec)
+		}
+	}
+}

@@ -33,24 +33,18 @@ func TestValidate_VariableDefaultValuesOfCorrectType_VariablesWithValidDefaultVa
       }
     `)
 }
-func TestValidate_VariableDefaultValuesOfCorrectType_NoRequiredVariablesWithDefaultValues(t *testing.T) {
-	testutil.ExpectFailsRule(t, graphql.DefaultValuesOfCorrectTypeRule, `
-      query UnreachableDefaultValues($a: Int! = 3, $b: String! = "default") {
+
+// Spec §6.1.2 applies a variable's default before checking the non-null
+// requirement, so a non-null variable may declare one and the default is
+// reached. This test asserted the opposite before the coercion fix; the
+// rejection now lives behind NonSpecArgumentHandling and is covered by
+// TestValidate_VariableDefaultValuesOfCorrectType_NonSpecRejectsNonNullVariableDefault.
+func TestValidate_VariableDefaultValuesOfCorrectType_NonNullVariablesWithDefaultValues(t *testing.T) {
+	testutil.ExpectPassesRule(t, graphql.DefaultValuesOfCorrectTypeRule, `
+      query NonNullDefaultValues($a: Int! = 3, $b: String! = "default") {
         dog { name }
       }
-    `,
-		[]gqlerrors.FormattedError{
-			testutil.RuleError(
-				`Variable "$a" of type "Int!" is required and will not `+
-					`use the default value. Perhaps you meant to use type "Int".`,
-				2, 49,
-			),
-			testutil.RuleError(
-				`Variable "$b" of type "String!" is required and will not `+
-					`use the default value. Perhaps you meant to use type "String".`,
-				2, 66,
-			),
-		})
+    `)
 }
 func TestValidate_VariableDefaultValuesOfCorrectType_VariablesWithInvalidDefaultValues(t *testing.T) {
 	testutil.ExpectFailsRule(t, graphql.DefaultValuesOfCorrectTypeRule, `
@@ -104,4 +98,52 @@ func TestValidate_VariableDefaultValuesOfCorrectType_ListVariablesWithInvalidIte
 
 func TestValidate_VariableDefaultValuesOfCorrectType_InvalidNonNull(t *testing.T) {
 	testutil.ExpectPassesRule(t, graphql.DefaultValuesOfCorrectTypeRule, `query($g:e!){a}`)
+}
+
+// One nullable argument, so a non-null variable can be used at it, under
+// whichever mode the caller asks for.
+func nonNullVariableDefaultSchema(t *testing.T, nonSpec bool) graphql.Schema {
+	t.Helper()
+	schema, err := graphql.NewSchema(graphql.SchemaConfig{
+		Query: graphql.NewObject(graphql.ObjectConfig{
+			Name: "Query",
+			Fields: graphql.Fields{
+				"f": &graphql.Field{
+					Type: graphql.String,
+					Args: graphql.FieldConfigArgument{
+						"a": &graphql.ArgumentConfig{Type: graphql.String},
+					},
+				},
+			},
+		}),
+		NonSpecArgumentHandling: nonSpec,
+	})
+	if err != nil {
+		t.Fatalf("Unexpected error, got: %v", err)
+	}
+	return schema
+}
+
+// Spec §6.1.2 applies a variable's default before checking the non-null
+// requirement, and nothing in the Validation section forbids a non-null variable
+// from declaring one.
+func TestValidate_VariableDefaultValuesOfCorrectType_NonNullVariableMayHaveDefault(t *testing.T) {
+	schema := nonNullVariableDefaultSchema(t, false)
+	testutil.ExpectPassesRuleWithSchema(t, &schema, graphql.DefaultValuesOfCorrectTypeRule, `
+      query Probe($a: String! = "VARDEF") {
+        f(a: $a)
+      }
+    `)
+}
+
+// NonSpecArgumentHandling keeps rejecting it.
+func TestValidate_VariableDefaultValuesOfCorrectType_NonSpecRejectsNonNullVariableDefault(t *testing.T) {
+	schema := nonNullVariableDefaultSchema(t, true)
+	testutil.ExpectFailsRuleWithSchema(t, &schema, graphql.DefaultValuesOfCorrectTypeRule, `
+      query Probe($a: String! = "VARDEF") {
+        f(a: $a)
+      }
+    `, []gqlerrors.FormattedError{
+		testutil.RuleError(`Variable "$a" of type "String!" is required and will not use the default value. Perhaps you meant to use type "String".`, 2, 33),
+	})
 }

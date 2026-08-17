@@ -43,7 +43,7 @@ func getVariableValues(
 // definitions and list of argument AST nodes.
 func getArgumentValues(
 	argDefs []*Argument, argASTs []*ast.Argument,
-	variableValues map[string]interface{}, nonSpec bool) map[string]interface{} {
+	variableValues map[string]interface{}, nonSpec bool) (map[string]interface{}, error) {
 
 	argASTMap := map[string]*ast.Argument{}
 	for _, argAST := range argASTs {
@@ -84,11 +84,30 @@ func getArgumentValues(
 		if isNullish(tmp) && !isProvidedNullVariable(value, variableValues) {
 			tmp = argDef.DefaultValue
 		}
+		// Spec §6.4.1 ②: a non-null argument is a field error when no value was
+		// supplied or the supplied value is null. The default was already applied
+		// above, so a nullish value here means the caller really sent null, or sent
+		// nothing and the argument declares no default.
+		if _, isNonNull := argDef.Type.(*NonNull); isNonNull && isNullish(tmp) {
+			var nodes []ast.Node
+			if argAST != nil {
+				nodes = []ast.Node{argAST}
+			}
+			return nil, gqlerrors.NewError(
+				fmt.Sprintf(`Argument "%v" of non-null type "%v" must not be null.`,
+					argDef.PrivateName, argDef.Type),
+				nodes,
+				"",
+				nil,
+				[]int{},
+				nil,
+			)
+		}
 		if !isUndefined || !isNullish(tmp) {
 			results[argDef.PrivateName] = tmp
 		}
 	}
-	return results
+	return results, nil
 }
 
 // Returns true if value is a reference to a variable the caller did not supply.
@@ -134,13 +153,21 @@ func getVariableValue(schema Schema, definitionAST *ast.VariableDefinition, inpu
 		)
 	}
 
-	isValid, messages := isValidInputValue(input, ttype)
+	// Spec §6.1.2 ①: the default stands in for a value the caller did not supply,
+	// and that step precedes the non-null requirement in ②. Applying it here is
+	// what lets a non-null variable declare a default — the validation below
+	// would otherwise reject the very case the default exists for. An explicitly
+	// supplied null is a value, so it does not reach this branch.
+	if !nonSpec && !provided && definitionAST.DefaultValue != nil {
+		return valueFromAST(definitionAST.DefaultValue, ttype, nil, nonSpec), nil
+	}
+
+	isValid, messages := isValidInputValue(input, ttype, nonSpec)
 	if isValid {
 		if isNullish(input) {
-			// The default stands in for a value the caller did not supply. By the
-			// specification an explicitly supplied null is a value, so it must not
-			// be replaced by the default.
-			if definitionAST.DefaultValue != nil && (nonSpec || !provided) {
+			// Only a schema that opted out still lets the default replace a supplied
+			// null; the spec-compliant path applied the default above.
+			if nonSpec && definitionAST.DefaultValue != nil {
 				return valueFromAST(definitionAST.DefaultValue, ttype, nil, nonSpec), nil
 			}
 		}
@@ -267,7 +294,7 @@ func typeFromAST(schema Schema, inputTypeAST ast.Type) (Type, error) {
 // Given a value and a GraphQL type, determine if the value will be
 // accepted for that type. This is primarily useful for validating the
 // runtime values of query variables.
-func isValidInputValue(value interface{}, ttype Input) (bool, []string) {
+func isValidInputValue(value interface{}, ttype Input, nonSpec bool) (bool, []string) {
 	if isNullish(value) {
 		if ttype, ok := ttype.(*NonNull); ok {
 			if ttype.OfType.Name() != "" {
@@ -279,7 +306,7 @@ func isValidInputValue(value interface{}, ttype Input) (bool, []string) {
 	}
 	switch ttype := ttype.(type) {
 	case *NonNull:
-		return isValidInputValue(value, ttype.OfType)
+		return isValidInputValue(value, ttype.OfType, nonSpec)
 	case *List:
 		valType := reflect.ValueOf(value)
 		if valType.Kind() == reflect.Ptr {
@@ -289,14 +316,14 @@ func isValidInputValue(value interface{}, ttype Input) (bool, []string) {
 			messagesReduce := []string{}
 			for i := 0; i < valType.Len(); i++ {
 				val := valType.Index(i).Interface()
-				_, messages := isValidInputValue(val, ttype.OfType)
+				_, messages := isValidInputValue(val, ttype.OfType, nonSpec)
 				for idx, message := range messages {
 					messagesReduce = append(messagesReduce, fmt.Sprintf(`In element #%v: %v`, idx+1, message))
 				}
 			}
 			return (len(messagesReduce) == 0), messagesReduce
 		}
-		return isValidInputValue(value, ttype.OfType)
+		return isValidInputValue(value, ttype.OfType, nonSpec)
 
 	case *InputObject:
 		messagesReduce := []string{}
@@ -330,7 +357,17 @@ func isValidInputValue(value interface{}, ttype Input) (bool, []string) {
 
 		// Ensure every defined field is valid.
 		for _, fieldName := range fieldNames {
-			_, messages := isValidInputValue(valueMap[fieldName], fields[fieldName].Type)
+			field := fields[fieldName]
+			v, ok := valueMap[fieldName]
+			// Spec §3.10 Input Coercion and §5.6.4 Input Object Required Fields: a
+			// field that declares a default value is optional even when its type is
+			// non-null, because the default stands in for the value the caller did
+			// not supply. A key that is present and holds null is a supplied value,
+			// so it is still validated.
+			if !nonSpec && !ok && field.DefaultValue != nil {
+				continue
+			}
+			_, messages := isValidInputValue(v, field.Type, nonSpec)
 			if messages != nil {
 				for _, message := range messages {
 					messagesReduce = append(messagesReduce, fmt.Sprintf(`In field "%v": %v`, fieldName, message))

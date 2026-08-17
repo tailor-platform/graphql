@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/tailor-platform/graphql"
+	"github.com/tailor-platform/graphql/gqlerrors"
 	"github.com/tailor-platform/graphql/testutil"
 )
 
@@ -84,6 +85,35 @@ var coercionProbeDeepInputObject = graphql.NewInputObject(graphql.InputObjectCon
 	Name: "CoercionProbeDeepInput",
 	Fields: graphql.InputObjectConfigFieldMap{
 		"level2": &graphql.InputObjectFieldConfig{Type: coercionProbeNestedDefaultInputObject},
+	},
+})
+
+// A non-null field that declares a default. Spec §3.10 and §5.6.4 make such a
+// field optional, so a document may omit it and take the default.
+var coercionProbeNonNullFieldDefaultInputObject = graphql.NewInputObject(graphql.InputObjectConfig{
+	Name: "CoercionProbeNonNullFieldDefaultInput",
+	Fields: graphql.InputObjectConfigFieldMap{
+		"a": &graphql.InputObjectFieldConfig{
+			Type:         graphql.NewNonNull(graphql.String),
+			DefaultValue: "FIELDDEF",
+		},
+	},
+})
+
+// The same field one level down, so the recursive paths are exercised too.
+var coercionProbeNonNullFieldNestedInputObject = graphql.NewInputObject(graphql.InputObjectConfig{
+	Name: "CoercionProbeNonNullFieldNestedInput",
+	Fields: graphql.InputObjectConfigFieldMap{
+		"inner": &graphql.InputObjectFieldConfig{Type: coercionProbeNonNullFieldDefaultInputObject},
+	},
+})
+
+// A non-null field with no default: genuinely required, so it stays required in
+// both modes.
+var coercionProbeRequiredInputObject = graphql.NewInputObject(graphql.InputObjectConfig{
+	Name: "CoercionProbeRequiredInput",
+	Fields: graphql.InputObjectConfigFieldMap{
+		"a": &graphql.InputObjectFieldConfig{Type: graphql.NewNonNull(graphql.String)},
 	},
 })
 
@@ -175,6 +205,34 @@ var coercionProbeType = graphql.NewObject(graphql.ObjectConfig{
 			},
 			Resolve: probeArgs,
 		},
+		"probeNonNullFieldDefault": &graphql.Field{
+			Type: graphql.String,
+			Args: graphql.FieldConfigArgument{
+				"input": &graphql.ArgumentConfig{Type: coercionProbeNonNullFieldDefaultInputObject},
+			},
+			Resolve: probeObjectArgs,
+		},
+		"probeNonNullFieldNested": &graphql.Field{
+			Type: graphql.String,
+			Args: graphql.FieldConfigArgument{
+				"input": &graphql.ArgumentConfig{Type: coercionProbeNonNullFieldNestedInputObject},
+			},
+			Resolve: probeObjectArgs,
+		},
+		"probeNonNullFieldList": &graphql.Field{
+			Type: graphql.String,
+			Args: graphql.FieldConfigArgument{
+				"input": &graphql.ArgumentConfig{Type: graphql.NewList(coercionProbeNonNullFieldDefaultInputObject)},
+			},
+			Resolve: probeArgs,
+		},
+		"probeObjectRequired": &graphql.Field{
+			Type: graphql.String,
+			Args: graphql.FieldConfigArgument{
+				"input": &graphql.ArgumentConfig{Type: coercionProbeRequiredInputObject},
+			},
+			Resolve: probeObjectArgs,
+		},
 	},
 })
 
@@ -222,6 +280,37 @@ func runProbeModes(t *testing.T, field, doc string, vars map[string]interface{},
 		t.Errorf("non-spec mode mismatch\n  got:  %s\n  want: %s", got, wantNonSpec)
 	}
 	if got := execProbe(t, coercionProbeSpecSchema, field, doc, vars); got != wantSpec {
+		t.Errorf("spec mode mismatch\n  got:  %s\n  want: %s", got, wantSpec)
+	}
+}
+
+// execDo runs the document through graphql.Do, so document validation runs as
+// well as coercion. An error comes back as a string so a test can pin an
+// expected rejection instead of failing the run.
+func execDo(t *testing.T, schema graphql.Schema, field, doc string, vars map[string]interface{}) string {
+	t.Helper()
+	result := graphql.Do(graphql.Params{
+		Schema:         schema,
+		RequestString:  doc,
+		VariableValues: vars,
+	})
+	if len(result.Errors) > 0 {
+		return "ERROR: " + result.Errors[0].Message
+	}
+	data, _ := result.Data.(map[string]interface{})
+	got, _ := data[field].(string)
+	return got
+}
+
+// runDoModes pins a case where the flag changes the outcome, end to end through
+// graphql.Do: the non-spec column is the regression guard, the spec column is
+// the fix.
+func runDoModes(t *testing.T, field, doc string, vars map[string]interface{}, wantNonSpec, wantSpec string) {
+	t.Helper()
+	if got := execDo(t, coercionProbeNonSpecSchema, field, doc, vars); got != wantNonSpec {
+		t.Errorf("non-spec mode mismatch\n  got:  %s\n  want: %s", got, wantNonSpec)
+	}
+	if got := execDo(t, coercionProbeSpecSchema, field, doc, vars); got != wantSpec {
 		t.Errorf("spec mode mismatch\n  got:  %s\n  want: %s", got, wantSpec)
 	}
 }
@@ -666,4 +755,168 @@ func TestArgumentCoercion_NonNullArgumentWithDefault_IsRequiredInNonSpecMode(t *
 	if result.Data != nil {
 		t.Fatalf("expected no data on a validation failure, got: %v", result.Data)
 	}
+}
+
+// Spec §3.10 Input Coercion and §5.6.4 Input Object Required Fields: an input
+// field is required only when its type is non-null AND it declares no default
+// value. A field that declares a default may be omitted, and the default applies.
+func TestArgumentCoercion_NonNullInputFieldWithDefault_IsOptional(t *testing.T) {
+	t.Run("literal omits the field -> default", func(t *testing.T) {
+		runDoModes(t, "probeNonNullFieldDefault",
+			`{ probeNonNullFieldDefault(input: {}) }`, nil,
+			"ERROR: Argument \"input\" has invalid value {}.\nIn field \"a\": Expected \"String!\", found null.",
+			`{"keys":["a"],"obj":{"a":"FIELDDEF"}}`)
+	})
+	t.Run("variable object omits the key -> default", func(t *testing.T) {
+		runDoModes(t, "probeNonNullFieldDefault",
+			`query Probe($in: CoercionProbeNonNullFieldDefaultInput) { probeNonNullFieldDefault(input: $in) }`,
+			map[string]interface{}{"in": map[string]interface{}{}},
+			"ERROR: Variable \"$in\" got invalid value {}.\nIn field \"a\": Expected \"String!\", found null.",
+			`{"keys":["a"],"obj":{"a":"FIELDDEF"}}`)
+	})
+	t.Run("nested literal omits the field -> default", func(t *testing.T) {
+		runDoModes(t, "probeNonNullFieldNested",
+			`{ probeNonNullFieldNested(input: {inner: {}}) }`, nil,
+			"ERROR: Argument \"input\" has invalid value {inner: {}}.\nIn field \"inner\": In field \"a\": Expected \"String!\", found null.",
+			`{"keys":["inner"],"obj":{"inner":{"a":"FIELDDEF"}}}`)
+	})
+	t.Run("list element omits the field -> default", func(t *testing.T) {
+		runDoModes(t, "probeNonNullFieldList",
+			`query Probe($in: [CoercionProbeNonNullFieldDefaultInput]) { probeNonNullFieldList(input: $in) }`,
+			map[string]interface{}{"in": []interface{}{map[string]interface{}{}}},
+			"ERROR: Variable \"$in\" got invalid value [{}].\nIn element #1: In field \"a\": Expected \"String!\", found null.",
+			`{"input":[{"a":"FIELDDEF"}],"keys":["input"]}`)
+	})
+}
+
+// An explicit null is a supplied value, so no default stands in for it and a
+// non-null field must still reject it — in both modes.
+func TestArgumentCoercion_NonNullInputFieldWithDefault_RejectsExplicitNull(t *testing.T) {
+	want := "ERROR: Variable \"$in\" got invalid value {\"a\":null}.\nIn field \"a\": Expected \"String!\", found null."
+	runDoModes(t, "probeNonNullFieldDefault",
+		`query Probe($in: CoercionProbeNonNullFieldDefaultInput) { probeNonNullFieldDefault(input: $in) }`,
+		map[string]interface{}{"in": map[string]interface{}{"a": nil}}, want, want)
+}
+
+// A non-null field that declares no default is genuinely required, in both modes.
+func TestArgumentCoercion_NonNullInputFieldWithoutDefault_StaysRequired(t *testing.T) {
+	want := "ERROR: Argument \"input\" has invalid value {}.\nIn field \"a\": Expected \"String!\", found null."
+	runDoModes(t, "probeObjectRequired", `{ probeObjectRequired(input: {}) }`, nil, want, want)
+}
+
+// Spec §6.1.2 CoerceVariableValues: the default is applied when the caller
+// supplied no value, and that check comes before the non-null requirement. A
+// non-null variable may therefore declare a default and be omitted.
+func TestArgumentCoercion_NonNullVariableWithDefault_UsesDefaultWhenOmitted(t *testing.T) {
+	doc := `query Probe($a: String! = "VARDEF") { probe(a: $a) }`
+	nonSpecWant := `ERROR: Variable "$a" of type "String!" is required and will not use the default value. Perhaps you meant to use type "String".`
+
+	t.Run("variable omitted -> default", func(t *testing.T) {
+		runDoModes(t, "probe", doc, map[string]interface{}{},
+			nonSpecWant, `{"a":"VARDEF","keys":["a"]}`)
+	})
+	t.Run("variable with value -> value", func(t *testing.T) {
+		runDoModes(t, "probe", doc, map[string]interface{}{"a": "v"},
+			nonSpecWant, `{"a":"v","keys":["a"]}`)
+	})
+	t.Run("variable explicitly null -> error in both modes", func(t *testing.T) {
+		runDoModes(t, "probe", doc, map[string]interface{}{"a": nil},
+			nonSpecWant, `ERROR: Variable "$a" of required type "String!" was not provided.`)
+	})
+}
+
+// Only the blanket "a non-null variable must not declare a default" rejection
+// goes away. A default whose type does not match is still rejected.
+func TestArgumentCoercion_NonNullVariableWithWronglyTypedDefault_StaysAnError(t *testing.T) {
+	runDoModes(t, "probe", `query Probe($a: String! = 123) { probe(a: $a) }`, map[string]interface{}{},
+		`ERROR: Variable "$a" of type "String!" is required and will not use the default value. Perhaps you meant to use type "String".`,
+		"ERROR: Variable \"$a\" has invalid default value: 123.\nExpected type \"String\", found 123.")
+}
+
+// execProbeErrors runs the document through graphql.Execute, which skips
+// document validation, so a coercion-level error can be observed on its own.
+func execProbeErrors(t *testing.T, schema graphql.Schema, doc string, vars map[string]interface{}) []gqlerrors.FormattedError {
+	t.Helper()
+	parsed := testutil.TestParse(t, doc)
+	result := graphql.Execute(graphql.ExecuteParams{
+		Schema: schema,
+		AST:    parsed,
+		Args:   vars,
+	})
+	return result.Errors
+}
+
+// Spec §6.4.1 ②: a non-null argument whose value resolves to null is a field
+// error. The default only stands in for a value the caller did not supply, so it
+// cannot rescue a supplied null. Observed through graphql.Execute because
+// document validation rejects this document earlier until §5.8.5 is implemented.
+func TestArgumentCoercion_NonNullArgumentGivenExplicitNull_IsAFieldError(t *testing.T) {
+	doc := `query Probe($x: String) { probeNonNullDefault(a: $x) }`
+	vars := map[string]interface{}{"x": nil}
+
+	if errs := execProbeErrors(t, coercionProbeNonSpecSchema, doc, vars); len(errs) != 0 {
+		t.Errorf("non-spec mode: expected no error, got: %v", errs)
+	}
+
+	errs := execProbeErrors(t, coercionProbeSpecSchema, doc, vars)
+	if len(errs) != 1 {
+		t.Fatalf("spec mode: expected exactly one field error, got: %v", errs)
+	}
+	want := `Argument "a" of non-null type "String!" must not be null.`
+	if errs[0].Message != want {
+		t.Errorf("message mismatch\n  got:  %s\n  want: %s", errs[0].Message, want)
+	}
+}
+
+// The same argument still takes its default when the caller supplied nothing.
+func TestArgumentCoercion_NonNullArgumentWithDefault_StillTakesDefault(t *testing.T) {
+	doc := `query Probe($x: String) { probeNonNullDefault(a: $x) }`
+	for _, tc := range []struct {
+		mode   string
+		schema graphql.Schema
+	}{
+		{"non-spec", coercionProbeNonSpecSchema},
+		{"spec", coercionProbeSpecSchema},
+	} {
+		t.Run(tc.mode, func(t *testing.T) {
+			if got := execProbe(t, tc.schema, "probeNonNullDefault", doc, map[string]interface{}{}); got != `{"a":"NNDEF","keys":["a"]}` {
+				t.Errorf("probe mismatch, got: %s", got)
+			}
+		})
+	}
+}
+
+// Spec §5.8.5 IsVariableUsageAllowed: a nullable variable may be used at a
+// non-null location when that location declares a default value. The default
+// covers the case where the caller supplies nothing.
+func TestArgumentCoercion_NullableVariableAtNonNullArgumentWithDefault_IsAllowed(t *testing.T) {
+	doc := `query Probe($x: String) { probeNonNullDefault(a: $x) }`
+	nonSpecWant := `ERROR: Variable "$x" of type "String" used in position expecting type "String!".`
+
+	t.Run("variable omitted -> argument default", func(t *testing.T) {
+		runDoModes(t, "probeNonNullDefault", doc, map[string]interface{}{},
+			nonSpecWant, `{"a":"NNDEF","keys":["a"]}`)
+	})
+	t.Run("variable explicitly null -> field error", func(t *testing.T) {
+		runDoModes(t, "probeNonNullDefault", doc, map[string]interface{}{"x": nil},
+			nonSpecWant, `ERROR: Argument "a" of non-null type "String!" must not be null.`)
+	})
+}
+
+// The spec names ObjectField alongside Argument, so an input object field that
+// declares a default permits the same usage.
+func TestArgumentCoercion_NullableVariableAtNonNullInputFieldWithDefault_IsAllowed(t *testing.T) {
+	runDoModes(t, "probeNonNullFieldDefault",
+		`query Probe($x: String) { probeNonNullFieldDefault(input: {a: $x}) }`,
+		map[string]interface{}{},
+		`ERROR: Variable "$x" of type "String" used in position expecting type "String!".`,
+		`{"keys":["a"],"obj":{"a":"FIELDDEF"}}`)
+}
+
+// A non-null location that declares no default still rejects a nullable variable.
+func TestArgumentCoercion_NullableVariableAtNonNullWithoutDefault_StaysRejected(t *testing.T) {
+	want := `ERROR: Variable "$x" of type "String" used in position expecting type "String!".`
+	runDoModes(t, "probeObjectRequired",
+		`query Probe($x: String) { probeObjectRequired(input: {a: $x}) }`,
+		map[string]interface{}{}, want, want)
 }
