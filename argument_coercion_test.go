@@ -226,6 +226,19 @@ var coercionProbeType = graphql.NewObject(graphql.ObjectConfig{
 			},
 			Resolve: probeArgs,
 		},
+		// A list whose item type is non-null, with a default on the argument. Spec
+		// §5.8.5 draws hasLocationDefaultValue from the argument or input object
+		// field a usage sits in, and a list position carries none.
+		"probeNonNullItemList": &graphql.Field{
+			Type: graphql.String,
+			Args: graphql.FieldConfigArgument{
+				"a": &graphql.ArgumentConfig{
+					Type:         graphql.NewList(graphql.NewNonNull(graphql.String)),
+					DefaultValue: []interface{}{"LISTDEF"},
+				},
+			},
+			Resolve: probeArgs,
+		},
 		"probeObjectRequired": &graphql.Field{
 			Type: graphql.String,
 			Args: graphql.FieldConfigArgument{
@@ -918,5 +931,16 @@ func TestArgumentCoercion_NullableVariableAtNonNullWithoutDefault_StaysRejected(
 	want := `ERROR: Variable "$x" of type "String" used in position expecting type "String!".`
 	runDoModes(t, "probeObjectRequired",
 		`query Probe($x: String) { probeObjectRequired(input: {a: $x}) }`,
+		map[string]interface{}{}, want, want)
+}
+
+// Spec §5.8.5 takes hasLocationDefaultValue from the argument or input object
+// field the usage sits in; a list position never carries one. The argument's own
+// default must therefore not rescue a nullable variable used as a non-null list
+// item.
+func TestArgumentCoercion_NullableVariableAtNonNullListItem_StaysRejected(t *testing.T) {
+	want := `ERROR: Variable "$x" of type "String" used in position expecting type "String!".`
+	runDoModes(t, "probeNonNullItemList",
+		`query Probe($x: String) { probeNonNullItemList(a: [$x]) }`,
 		map[string]interface{}{}, want, want)
 }
