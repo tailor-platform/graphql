@@ -420,7 +420,12 @@ func isValidInputValue(value interface{}, ttype Input, nonSpec bool) (bool, []st
 			// non-null, because the default stands in for the value the caller did
 			// not supply. A key that is present and holds null is a supplied value,
 			// so it is still validated.
-			if !nonSpec && !ok && field.DefaultValue != nil {
+			//
+			// The test matches the one coercion applies in coerceValue and
+			// valueFromAST: a nullish default is not a value either of them will
+			// substitute, so treating it as one here would pass a field that then
+			// goes missing from the coerced map.
+			if !nonSpec && !ok && !isNullish(field.DefaultValue) {
 				continue
 			}
 			_, messages := isValidInputValue(v, field.Type, nonSpec)

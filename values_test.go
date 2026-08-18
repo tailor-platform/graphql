@@ -1,6 +1,7 @@
 package graphql
 
 import (
+	"math"
 	"reflect"
 	"testing"
 )
@@ -108,5 +109,36 @@ func Test_isValidInputValue_NonNullFieldWithDefault(t *testing.T) {
 		if isValid, _ := isValidInputValue(map[string]interface{}{}, withoutDefault, nonSpec); isValid {
 			t.Errorf("expected an omitted field without a default to be invalid (nonSpec=%v)", nonSpec)
 		}
+	}
+}
+
+// A default that is nullish but not nil — a typed nil pointer, say — is not a
+// default coercion can substitute: coerceValue and valueFromAST both skip it
+// under isNullish. Validation has to agree, otherwise a non-null field passes
+// validation and then goes missing from the coerced map.
+func Test_isValidInputValue_NullishDefaultIsNotADefault(t *testing.T) {
+	var nilString *string
+	for _, tc := range []struct {
+		name       string
+		defaultVal interface{}
+		wantValid  bool
+	}{
+		{"usable default", "FIELDDEF", true},
+		{"no default", nil, false},
+		{"typed nil pointer", nilString, false},
+		{"NaN", math.NaN(), false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			in := NewInputObject(InputObjectConfig{
+				Name: "NullishDefault" + tc.name,
+				Fields: InputObjectConfigFieldMap{
+					"a": &InputObjectFieldConfig{Type: NewNonNull(String), DefaultValue: tc.defaultVal},
+				},
+			})
+			isValid, messages := isValidInputValue(map[string]interface{}{}, in, false)
+			if isValid != tc.wantValid {
+				t.Errorf("isValid = %v, want %v (messages: %v)", isValid, tc.wantValid, messages)
+			}
+		})
 	}
 }

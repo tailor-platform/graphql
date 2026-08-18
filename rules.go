@@ -1257,9 +1257,11 @@ func PossibleFragmentSpreadsRule(context *ValidationContext) *ValidationRuleInst
 func ProvidedNonNullArgumentsRule(context *ValidationContext) *ValidationRuleInstance {
 
 	// Spec §5.4.2.1: an argument is required only when its type is non-null and
-	// it declares no default value. A schema that opted into
-	// NonSpecArgumentHandling keeps the older, stricter reading, under which
-	// every non-null argument is required whether or not it has a default.
+	// it declares no default value. Nullish is the test coercion applies, so a
+	// default coercion will not substitute leaves the argument required. A schema
+	// that opted into NonSpecArgumentHandling keeps the older, stricter reading,
+	// under which every non-null argument is required whether or not it has a
+	// default.
 	nonSpec := context.Schema().nonSpecArgumentHandling
 
 	visitorOpts := &visitor.VisitorOptions{
@@ -1286,7 +1288,7 @@ func ProvidedNonNullArgumentsRule(context *ValidationContext) *ValidationRuleIns
 						for _, argDef := range fieldDef.Args {
 							argAST, _ := argASTMap[argDef.Name()]
 							if argAST == nil {
-								if argDefType, ok := argDef.Type.(*NonNull); ok && (nonSpec || argDef.DefaultValue == nil) {
+								if argDefType, ok := argDef.Type.(*NonNull); ok && (nonSpec || isNullish(argDef.DefaultValue)) {
 									fieldName := ""
 									if fieldAST.Name != nil {
 										fieldName = fieldAST.Name.Value
@@ -1327,7 +1329,7 @@ func ProvidedNonNullArgumentsRule(context *ValidationContext) *ValidationRuleIns
 						for _, argDef := range directiveDef.Args {
 							argAST, _ := argASTMap[argDef.Name()]
 							if argAST == nil {
-								if argDefType, ok := argDef.Type.(*NonNull); ok && (nonSpec || argDef.DefaultValue == nil) {
+								if argDefType, ok := argDef.Type.(*NonNull); ok && (nonSpec || isNullish(argDef.DefaultValue)) {
 									directiveName := ""
 									if directiveAST.Name != nil {
 										directiveName = directiveAST.Name.Value
@@ -1682,7 +1684,9 @@ func allowedVariableUsage(schema *Schema, varType Type, varDefaultValue ast.Valu
 			// The parser does not accept the null literal, so a default value that
 			// exists is necessarily not null. Revisit if that ever changes.
 			hasNonNullVariableDefaultValue := varDefaultValue != nil
-			hasLocationDefaultValue := locationDefaultValue != nil
+			// Nullish is the test coercion applies to a declared default, so a
+			// default it will not substitute does not count as one here either.
+			hasLocationDefaultValue := !isNullish(locationDefaultValue)
 			if !hasNonNullVariableDefaultValue && !hasLocationDefaultValue {
 				return false
 			}
@@ -1839,7 +1843,10 @@ func isValidLiteralValue(ttype Input, valueAST ast.Value, nonSpec bool) (bool, [
 			// Spec §3.10 Input Coercion and §5.6.4 Input Object Required Fields: a
 			// field that declares a default value is optional even when its type is
 			// non-null. A field written in the literal is still validated.
-			if !nonSpec && !ok && field.DefaultValue != nil {
+			//
+			// Nullish is the same test coercion applies, so a default coercion will
+			// not substitute does not make the field optional here either.
+			if !nonSpec && !ok && !isNullish(field.DefaultValue) {
 				continue
 			}
 			if isValid, messages := isValidLiteralValue(field.Type, fieldASTValue, nonSpec); !isValid {

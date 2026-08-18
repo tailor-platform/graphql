@@ -312,3 +312,35 @@ func TestValidate_ProvidedNonNullArguments_DirectiveArguments_NonSpecErrorsOnNon
 		testutil.RuleError(`Directive "@defer" argument "if" of type "Boolean!" is required but not provided.`, 3, 24),
 	})
 }
+
+// A default coercion will not substitute — a typed nil pointer is nullish —
+// does not make a non-null argument optional.
+func TestValidate_ProvidedNonNullArguments_FieldArguments_NullishDefaultKeepsArgumentRequired(t *testing.T) {
+	var nilString *string
+	schema, err := graphql.NewSchema(graphql.SchemaConfig{
+		Query: graphql.NewObject(graphql.ObjectConfig{
+			Name: "Query",
+			Fields: graphql.Fields{
+				"fieldWithNullishDefault": &graphql.Field{
+					Type: graphql.String,
+					Args: graphql.FieldConfigArgument{
+						"arg": &graphql.ArgumentConfig{
+							Type:         graphql.NewNonNull(graphql.Boolean),
+							DefaultValue: nilString,
+						},
+					},
+				},
+			},
+		}),
+	})
+	if err != nil {
+		t.Fatalf("Unexpected error, got: %v", err)
+	}
+	testutil.ExpectFailsRuleWithSchema(t, &schema, graphql.ProvidedNonNullArgumentsRule, `
+        {
+          fieldWithNullishDefault
+        }
+    `, []gqlerrors.FormattedError{
+		testutil.RuleError(`Field "fieldWithNullishDefault" argument "arg" of type "Boolean!" is required but not provided.`, 3, 11),
+	})
+}

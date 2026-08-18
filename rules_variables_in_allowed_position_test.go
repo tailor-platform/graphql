@@ -315,3 +315,37 @@ func TestValidate_VariablesInAllowedPosition_NonSpecIgnoresArgumentDefault(t *te
 			`expecting type "String!".`, 2, 19, 3, 24),
 	})
 }
+
+// Spec §5.8.5 hasLocationDefaultValue: a default coercion will not substitute
+// does not permit a nullable variable at a non-null location. Validation is
+// static, so this holds whatever values the request later supplies.
+func TestValidate_VariablesInAllowedPosition_NullishArgumentDefaultIsNotADefault(t *testing.T) {
+	var nilString *string
+	schema, err := graphql.NewSchema(graphql.SchemaConfig{
+		Query: graphql.NewObject(graphql.ObjectConfig{
+			Name: "Query",
+			Fields: graphql.Fields{
+				"withNullishDefault": &graphql.Field{
+					Type: graphql.String,
+					Args: graphql.FieldConfigArgument{
+						"a": &graphql.ArgumentConfig{
+							Type:         graphql.NewNonNull(graphql.String),
+							DefaultValue: nilString,
+						},
+					},
+				},
+			},
+		}),
+	})
+	if err != nil {
+		t.Fatalf("Unexpected error, got: %v", err)
+	}
+	testutil.ExpectFailsRuleWithSchema(t, &schema, graphql.VariablesInAllowedPositionRule, `
+      query Probe($x: String) {
+        withNullishDefault(a: $x)
+      }
+    `, []gqlerrors.FormattedError{
+		testutil.RuleError(`Variable "$x" of type "String" used in position `+
+			`expecting type "String!".`, 2, 19, 3, 31),
+	})
+}

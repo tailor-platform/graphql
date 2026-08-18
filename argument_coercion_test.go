@@ -108,6 +108,21 @@ var coercionProbeNonNullFieldNestedInputObject = graphql.NewInputObject(graphql.
 	},
 })
 
+// A non-null field whose default is a typed nil pointer. isNullish treats that as
+// no value, so coercion will not substitute it; validation has to reach the same
+// conclusion or the field goes missing from the coerced map.
+var coercionProbeNilString *string
+
+var coercionProbeNullishDefaultInputObject = graphql.NewInputObject(graphql.InputObjectConfig{
+	Name: "CoercionProbeNullishDefaultInput",
+	Fields: graphql.InputObjectConfigFieldMap{
+		"a": &graphql.InputObjectFieldConfig{
+			Type:         graphql.NewNonNull(graphql.String),
+			DefaultValue: coercionProbeNilString,
+		},
+	},
+})
+
 // A non-null field with no default: genuinely required, so it stays required in
 // both modes.
 var coercionProbeRequiredInputObject = graphql.NewInputObject(graphql.InputObjectConfig{
@@ -238,6 +253,25 @@ var coercionProbeType = graphql.NewObject(graphql.ObjectConfig{
 				},
 			},
 			Resolve: probeArgs,
+		},
+		// A non-null argument whose default is a typed nil pointer: nullish, so
+		// coercion will not substitute it and the argument stays required.
+		"probeNullishArgDefault": &graphql.Field{
+			Type: graphql.String,
+			Args: graphql.FieldConfigArgument{
+				"a": &graphql.ArgumentConfig{
+					Type:         graphql.NewNonNull(graphql.String),
+					DefaultValue: coercionProbeNilString,
+				},
+			},
+			Resolve: probeArgs,
+		},
+		"probeNullishFieldDefault": &graphql.Field{
+			Type: graphql.String,
+			Args: graphql.FieldConfigArgument{
+				"input": &graphql.ArgumentConfig{Type: coercionProbeNullishDefaultInputObject},
+			},
+			Resolve: probeObjectArgs,
 		},
 		"probeObjectRequired": &graphql.Field{
 			Type: graphql.String,
@@ -991,5 +1025,48 @@ func TestArgumentCoercion_NullVariableAtNonNullInputField_IsAFieldError(t *testi
 		runDoModes(t, "probeObjectRequired",
 			`query Probe($x: String) { probeObjectRequired(input: {a: $x}) }`,
 			map[string]interface{}{"x": nil}, nonSpecWant, nonSpecWant)
+	})
+}
+
+// Spec §3.10: a field is optional when its definition "provides a default
+// value". A default that coercion cannot substitute — isNullish treats a typed
+// nil pointer as no value — does not make the field optional, so a non-null
+// field carrying one stays required. Without this the field passed validation
+// and was then dropped by coercion, handing the resolver an input object that
+// is missing a field its own schema declares non-null.
+func TestArgumentCoercion_NullishFieldDefault_DoesNotMakeFieldOptional(t *testing.T) {
+	t.Run("literal omits the field", func(t *testing.T) {
+		want := "ERROR: Argument \"input\" has invalid value {}.\nIn field \"a\": Expected \"String!\", found null."
+		runDoModes(t, "probeNullishFieldDefault",
+			`{ probeNullishFieldDefault(input: {}) }`, nil, want, want)
+	})
+	t.Run("variable object omits the key", func(t *testing.T) {
+		want := "ERROR: Variable \"$in\" got invalid value {}.\nIn field \"a\": Expected \"String!\", found null."
+		runDoModes(t, "probeNullishFieldDefault",
+			`query Probe($in: CoercionProbeNullishDefaultInput) { probeNullishFieldDefault(input: $in) }`,
+			map[string]interface{}{"in": map[string]interface{}{}}, want, want)
+	})
+}
+
+// The same reasoning as TestArgumentCoercion_NullishFieldDefault, one level up:
+// a default coercion will not substitute does not make an argument optional
+// either. Spec §5.4.2.1 (§5.4.3 in draft) for the first case, §5.8.5 for the
+// rest.
+func TestArgumentCoercion_NullishArgumentDefault_KeepsArgumentRequired(t *testing.T) {
+	t.Run("argument omitted from the document", func(t *testing.T) {
+		want := `ERROR: Field "probeNullishArgDefault" argument "a" of type "String!" is required but not provided.`
+		runDoModes(t, "probeNullishArgDefault", `{ probeNullishArgDefault }`, nil, want, want)
+	})
+
+	doc := `query Probe($x: String) { probeNullishArgDefault(a: $x) }`
+	want := `ERROR: Variable "$x" of type "String" used in position expecting type "String!".`
+
+	t.Run("nullable variable, not supplied", func(t *testing.T) {
+		runDoModes(t, "probeNullishArgDefault", doc, map[string]interface{}{}, want, want)
+	})
+	// Validation is static: the document must be rejected whether or not this
+	// particular request happens to supply a value for the variable.
+	t.Run("nullable variable with a value, still rejected", func(t *testing.T) {
+		runDoModes(t, "probeNullishArgDefault", doc, map[string]interface{}{"x": "v"}, want, want)
 	})
 }
