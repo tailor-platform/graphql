@@ -944,3 +944,52 @@ func TestArgumentCoercion_NullableVariableAtNonNullListItem_StaysRejected(t *tes
 		`query Probe($x: String) { probeNonNullItemList(a: [$x]) }`,
 		map[string]interface{}{}, want, want)
 }
+
+// Spec §3.10 Input Coercion, fourth rule: "If a variable is provided for an
+// input object field, the runtime value of that variable must be used. If the
+// runtime value is null and the field type is non-null, a field error must be
+// raised. If no runtime value is provided, the variable definition's default
+// value should be used. If the variable definition does not provide a default
+// value, the input object field definition's default value should be used."
+//
+// The null case only becomes reachable once §5.8.5 lets a nullable variable sit
+// at a non-null field that declares a default; before that the document was
+// rejected during validation.
+func TestArgumentCoercion_NullVariableAtNonNullInputField_IsAFieldError(t *testing.T) {
+	nonSpecWant := `ERROR: Variable "$x" of type "String" used in position expecting type "String!".`
+
+	t.Run("field with a default, variable is null -> field error", func(t *testing.T) {
+		runDoModes(t, "probeNonNullFieldDefault",
+			`query Probe($x: String) { probeNonNullFieldDefault(input: {a: $x}) }`,
+			map[string]interface{}{"x": nil},
+			nonSpecWant,
+			"ERROR: Argument \"input\" has invalid value.\nIn field \"a\": Expected \"String!\", found null.")
+	})
+	t.Run("nested field with a default, variable is null -> field error", func(t *testing.T) {
+		runDoModes(t, "probeNonNullFieldNested",
+			`query Probe($x: String) { probeNonNullFieldNested(input: {inner: {a: $x}}) }`,
+			map[string]interface{}{"x": nil},
+			nonSpecWant,
+			"ERROR: Argument \"input\" has invalid value.\nIn field \"inner\": In field \"a\": Expected \"String!\", found null.")
+	})
+	t.Run("list element field with a default, variable is null -> field error", func(t *testing.T) {
+		runDoModes(t, "probeNonNullFieldList",
+			`query Probe($x: String) { probeNonNullFieldList(input: [{a: $x}]) }`,
+			map[string]interface{}{"x": nil},
+			nonSpecWant,
+			"ERROR: Argument \"input\" has invalid value.\nIn element #1: In field \"a\": Expected \"String!\", found null.")
+	})
+	t.Run("field with a default, variable has a value -> value", func(t *testing.T) {
+		runDoModes(t, "probeNonNullFieldDefault",
+			`query Probe($x: String) { probeNonNullFieldDefault(input: {a: $x}) }`,
+			map[string]interface{}{"x": "v"},
+			nonSpecWant, `{"keys":["a"],"obj":{"a":"v"}}`)
+	})
+	// A field with no default keeps being rejected during validation, because
+	// §5.8.5 finds neither a variable nor a location default.
+	t.Run("field without a default stays a validation error", func(t *testing.T) {
+		runDoModes(t, "probeObjectRequired",
+			`query Probe($x: String) { probeObjectRequired(input: {a: $x}) }`,
+			map[string]interface{}{"x": nil}, nonSpecWant, nonSpecWant)
+	})
+}

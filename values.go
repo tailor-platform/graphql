@@ -84,30 +84,86 @@ func getArgumentValues(
 		if isNullish(tmp) && !isProvidedNullVariable(value, variableValues) {
 			tmp = argDef.DefaultValue
 		}
-		// Spec §6.4.1 ②: a non-null argument is a field error when no value was
-		// supplied or the supplied value is null. The default was already applied
-		// above, so a nullish value here means the caller really sent null, or sent
-		// nothing and the argument declares no default.
-		if _, isNonNull := argDef.Type.(*NonNull); isNonNull && isNullish(tmp) {
+		// Spec §6.4.1 ② for the argument itself, and the fourth rule of input
+		// object coercion (§3.10) for a field whose value came from a variable: a
+		// null at a non-null position is a field error. The default was already
+		// applied above, so a null still standing here is one the caller supplied
+		// — or, for the argument itself, a value that was never supplied and has
+		// no default to stand in.
+		if message, found := firstNonNullViolation(tmp, argDef.Type); found {
 			var nodes []ast.Node
 			if argAST != nil {
 				nodes = []ast.Node{argAST}
 			}
-			return nil, gqlerrors.NewError(
-				fmt.Sprintf(`Argument "%v" of non-null type "%v" must not be null.`,
-					argDef.PrivateName, argDef.Type),
-				nodes,
-				"",
-				nil,
-				[]int{},
-				nil,
-			)
+			text := fmt.Sprintf("Argument %q has invalid value.\n%v", argDef.PrivateName, message)
+			if _, isNonNull := argDef.Type.(*NonNull); isNonNull && isNullish(tmp) {
+				// The argument itself is the null, so there is no path to report.
+				text = fmt.Sprintf(`Argument "%v" of non-null type "%v" must not be null.`,
+					argDef.PrivateName, argDef.Type)
+			}
+			return nil, gqlerrors.NewError(text, nodes, "", nil, []int{}, nil)
 		}
 		if !isUndefined || !isNullish(tmp) {
 			results[argDef.PrivateName] = tmp
 		}
 	}
 	return results, nil
+}
+
+// Walks a coerced argument value and reports the first null sitting at a
+// non-null position, together with the path leading to it. Spec §6.4.1 ② covers
+// the argument itself and the fourth rule of input object coercion (§3.10)
+// covers a field whose value came from a variable: in both cases a null that the
+// caller supplied where the type is non-null is a field error.
+//
+// Only entries the coerced value actually carries are visited. A field the
+// caller never supplied is absent from the map, and whether that is allowed is
+// the validation rules' business, not this walk's.
+func firstNonNullViolation(value interface{}, ttype Input) (string, bool) {
+	switch ttype := ttype.(type) {
+	case *NonNull:
+		if isNullish(value) {
+			if name := ttype.OfType.Name(); name != "" {
+				return fmt.Sprintf(`Expected "%v!", found null.`, name), true
+			}
+			return "Expected non-null value, found null.", true
+		}
+		ofType, _ := ttype.OfType.(Input)
+		return firstNonNullViolation(value, ofType)
+	case *List:
+		itemType, _ := ttype.OfType.(Input)
+		valType := reflect.ValueOf(value)
+		if valType.Kind() != reflect.Slice {
+			return "", false
+		}
+		for i := 0; i < valType.Len(); i++ {
+			if message, found := firstNonNullViolation(valType.Index(i).Interface(), itemType); found {
+				return fmt.Sprintf("In element #%v: %v", i+1, message), true
+			}
+		}
+	case *InputObject:
+		valueMap, ok := value.(map[string]interface{})
+		if !ok {
+			return "", false
+		}
+		// Sorted so the reported field is stable across runs.
+		fieldNames := make([]string, 0, len(valueMap))
+		for fieldName := range valueMap {
+			fieldNames = append(fieldNames, fieldName)
+		}
+		sort.Strings(fieldNames)
+		fields := ttype.Fields()
+		for _, fieldName := range fieldNames {
+			field, ok := fields[fieldName]
+			if !ok {
+				continue
+			}
+			if message, found := firstNonNullViolation(valueMap[fieldName], field.Type); found {
+				return fmt.Sprintf("In field %q: %v", fieldName, message), true
+			}
+		}
+	}
+	return "", false
 }
 
 // Returns true if value is a reference to a variable the caller did not supply.
