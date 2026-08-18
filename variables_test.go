@@ -898,20 +898,28 @@ func TestVariables_NonNullableScalars_AllowsNonNullableInputsToBeSetToAValueDire
 		t.Fatalf("Unexpected result, Diff: %v", testutil.Diff(expected, result))
 	}
 }
-func TestVariables_NonNullableScalars_PassesAlongNullForNonNullableInputsIfExplicitlySetInTheQuery(t *testing.T) {
+
+// Spec §6.4.1 ②: a non-null argument is a field error when no value was supplied
+// or the supplied value is null. Reached here only through Execute, because
+// ProvidedNonNullArgumentsRule rejects such a document during validation. Before
+// the coercion fix this returned null with no error, leaving the resolver unable
+// to tell that a required argument never arrived.
+func TestVariables_NonNullableScalars_DoesNotAllowNonNullableInputsToBeOmittedDirectly(t *testing.T) {
 	doc := `
       {
         fieldWithNonNullableStringInput
       }
 	`
 
-	params := map[string]interface{}{
-		"value": "a",
-	}
-
 	expected := &graphql.Result{
 		Data: map[string]interface{}{
 			"fieldWithNonNullableStringInput": nil,
+		},
+		Errors: []gqlerrors.FormattedError{
+			{
+				Message:   `Argument "input" of non-null type "String!" must not be null.`,
+				Locations: []location.SourceLocation{},
+			},
 		},
 	}
 
@@ -921,13 +929,9 @@ func TestVariables_NonNullableScalars_PassesAlongNullForNonNullableInputsIfExpli
 	ep := graphql.ExecuteParams{
 		Schema: variablesTestSchema,
 		AST:    ast,
-		Args:   params,
 	}
 	result := testutil.TestExecute(t, ep)
-	if len(result.Errors) > 0 {
-		t.Fatalf("wrong result, unexpected errors: %v", result.Errors)
-	}
-	if !reflect.DeepEqual(expected, result) {
+	if !testutil.EqualResults(expected, result) {
 		t.Fatalf("Unexpected result, Diff: %v", testutil.Diff(expected, result))
 	}
 }

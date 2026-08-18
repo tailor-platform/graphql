@@ -68,13 +68,15 @@ func reportError(context *ValidationContext, message string, nodes []ast.Node) (
 // A GraphQL document is only valid if all field argument literal values are
 // of the type expected by their position.
 func ArgumentsOfCorrectTypeRule(context *ValidationContext) *ValidationRuleInstance {
+	nonSpec := context.Schema().nonSpecArgumentHandling
+
 	visitorOpts := &visitor.VisitorOptions{
 		KindFuncMap: map[string]visitor.NamedVisitFuncs{
 			kinds.Argument: {
 				Kind: func(p visitor.VisitFuncParams) (string, interface{}) {
 					if argAST, ok := p.Node.(*ast.Argument); ok {
 						if argDef := context.Argument(); argDef != nil {
-							if isValid, messages := isValidLiteralValue(argDef.Type, argAST.Value); !isValid {
+							if isValid, messages := isValidLiteralValue(argDef.Type, argAST.Value, nonSpec); !isValid {
 								var messagesStr, argNameValue string
 								if argAST.Name != nil {
 									argNameValue = argAST.Name.Value
@@ -108,6 +110,8 @@ func ArgumentsOfCorrectTypeRule(context *ValidationContext) *ValidationRuleInsta
 // A GraphQL document is only valid if all variable default values are of the
 // type expected by their definition.
 func DefaultValuesOfCorrectTypeRule(context *ValidationContext) *ValidationRuleInstance {
+	nonSpec := context.Schema().nonSpecArgumentHandling
+
 	visitorOpts := &visitor.VisitorOptions{
 		KindFuncMap: map[string]visitor.NamedVisitFuncs{
 			kinds.VariableDefinition: {
@@ -123,16 +127,21 @@ func DefaultValuesOfCorrectTypeRule(context *ValidationContext) *ValidationRuleI
 						}
 						ttype := context.InputType()
 
-						// when input variable value must be nonNull, and set default value is unnecessary
-						if ttype, ok := ttype.(*NonNull); ok && defaultValue != nil {
-							reportError(
-								context,
-								fmt.Sprintf(`Variable "$%v" of type "%v" is required and will not use the default value. Perhaps you meant to use type "%v".`,
-									name, ttype, ttype.OfType),
-								[]ast.Node{defaultValue},
-							)
+						// Spec §6.1.2 applies a variable's default before checking the
+						// non-null requirement, so a non-null variable may declare one and
+						// nothing in the Validation section forbids it. Only a schema that
+						// opted into NonSpecArgumentHandling keeps rejecting it.
+						if nonSpec {
+							if ttype, ok := ttype.(*NonNull); ok && defaultValue != nil {
+								reportError(
+									context,
+									fmt.Sprintf(`Variable "$%v" of type "%v" is required and will not use the default value. Perhaps you meant to use type "%v".`,
+										name, ttype, ttype.OfType),
+									[]ast.Node{defaultValue},
+								)
+							}
 						}
-						if isValid, messages := isValidLiteralValue(ttype, defaultValue); !isValid && defaultValue != nil {
+						if isValid, messages := isValidLiteralValue(ttype, defaultValue, nonSpec); !isValid && defaultValue != nil {
 							if len(messages) > 0 {
 								messagesStr = "\n" + strings.Join(messages, "\n")
 							}
@@ -1247,6 +1256,14 @@ func PossibleFragmentSpreadsRule(context *ValidationContext) *ValidationRuleInst
 // have been provided.
 func ProvidedNonNullArgumentsRule(context *ValidationContext) *ValidationRuleInstance {
 
+	// Spec §5.4.2.1: an argument is required only when its type is non-null and
+	// it declares no default value. Nullish is the test that coercion applies, so
+	// a default that coercion will not substitute leaves the argument required. A
+	// schema that opted into NonSpecArgumentHandling keeps the older, stricter
+	// reading, under which every non-null argument is required whether or not it
+	// has a default.
+	nonSpec := context.Schema().nonSpecArgumentHandling
+
 	visitorOpts := &visitor.VisitorOptions{
 		KindFuncMap: map[string]visitor.NamedVisitFuncs{
 			kinds.Field: {
@@ -1271,7 +1288,7 @@ func ProvidedNonNullArgumentsRule(context *ValidationContext) *ValidationRuleIns
 						for _, argDef := range fieldDef.Args {
 							argAST, _ := argASTMap[argDef.Name()]
 							if argAST == nil {
-								if argDefType, ok := argDef.Type.(*NonNull); ok {
+								if argDefType, ok := argDef.Type.(*NonNull); ok && (nonSpec || isNullish(argDef.DefaultValue)) {
 									fieldName := ""
 									if fieldAST.Name != nil {
 										fieldName = fieldAST.Name.Value
@@ -1312,7 +1329,7 @@ func ProvidedNonNullArgumentsRule(context *ValidationContext) *ValidationRuleIns
 						for _, argDef := range directiveDef.Args {
 							argAST, _ := argASTMap[argDef.Name()]
 							if argAST == nil {
-								if argDefType, ok := argDef.Type.(*NonNull); ok {
+								if argDefType, ok := argDef.Type.(*NonNull); ok && (nonSpec || isNullish(argDef.DefaultValue)) {
 									directiveName := ""
 									if directiveAST.Name != nil {
 										directiveName = directiveAST.Name.Value
@@ -1656,8 +1673,33 @@ func effectiveType(varType Type, varDef *ast.VariableDefinition) Type {
 	return NewNonNull(varType)
 }
 
+// allowedVariableUsage implements spec §5.8.5 IsVariableUsageAllowed. A nullable
+// variable is allowed at a non-null location when either the variable or the
+// location declares a default value: whichever one exists covers the case where
+// the caller supplies nothing.
+func allowedVariableUsage(schema *Schema, varType Type, varDefaultValue ast.Value,
+	locationType Input, locationDefaultValue interface{}) bool {
+	if locType, ok := locationType.(*NonNull); ok {
+		if _, isNonNull := varType.(*NonNull); !isNonNull {
+			// The parser does not accept the null literal, so a default value that
+			// exists is necessarily not null. Revisit if that ever changes.
+			hasNonNullVariableDefaultValue := varDefaultValue != nil
+			// Nullish is the test that coercion applies to a declared default, so a
+			// default it will not substitute does not count as one here either.
+			hasLocationDefaultValue := !isNullish(locationDefaultValue)
+			if !hasNonNullVariableDefaultValue && !hasLocationDefaultValue {
+				return false
+			}
+			ofType, _ := locType.OfType.(Input)
+			return isTypeSubTypeOf(schema, varType, ofType)
+		}
+	}
+	return isTypeSubTypeOf(schema, varType, locationType)
+}
+
 // VariablesInAllowedPositionRule Variables passed to field arguments conform to type
 func VariablesInAllowedPositionRule(context *ValidationContext) *ValidationRuleInstance {
+	nonSpec := context.Schema().nonSpecArgumentHandling
 
 	varDefMap := map[string]*ast.VariableDefinition{}
 
@@ -1683,7 +1725,15 @@ func VariablesInAllowedPositionRule(context *ValidationContext) *ValidationRuleI
 								if err != nil {
 									varType = nil
 								}
-								if varType != nil && !isTypeSubTypeOf(context.Schema(), effectiveType(varType, varDef), usage.Type) {
+								allowed := true
+								if varType != nil {
+									if nonSpec {
+										allowed = isTypeSubTypeOf(context.Schema(), effectiveType(varType, varDef), usage.Type)
+									} else {
+										allowed = allowedVariableUsage(context.Schema(), varType, varDef.DefaultValue, usage.Type, usage.LocationDefaultValue)
+									}
+								}
+								if varType != nil && !allowed {
 									reportError(
 										context,
 										fmt.Sprintf(`Variable "$%v" of type "%v" used in position `+
@@ -1724,7 +1774,7 @@ func VariablesInAllowedPositionRule(context *ValidationContext) *ValidationRuleI
 //
 // Note that this only validates literal values, variables are assumed to
 // provide values of the correct type.
-func isValidLiteralValue(ttype Input, valueAST ast.Value) (bool, []string) {
+func isValidLiteralValue(ttype Input, valueAST ast.Value, nonSpec bool) (bool, []string) {
 	if _, ok := ttype.(*NonNull); !ok {
 		if valueAST == nil {
 			return true, nil
@@ -1749,21 +1799,21 @@ func isValidLiteralValue(ttype Input, valueAST ast.Value) (bool, []string) {
 			return false, []string{"Expected non-null value, found null."}
 		}
 		ofType, _ := ttype.OfType.(Input)
-		return isValidLiteralValue(ofType, valueAST)
+		return isValidLiteralValue(ofType, valueAST, nonSpec)
 	case *List:
 		// Lists accept a non-list value as a list of one.
 		itemType, _ := ttype.OfType.(Input)
 		if valueAST, ok := valueAST.(*ast.ListValue); ok {
 			messagesReduce := []string{}
 			for _, value := range valueAST.Values {
-				_, messages := isValidLiteralValue(itemType, value)
+				_, messages := isValidLiteralValue(itemType, value, nonSpec)
 				for idx, message := range messages {
 					messagesReduce = append(messagesReduce, fmt.Sprintf(`In element #%v: %v`, idx+1, message))
 				}
 			}
 			return (len(messagesReduce) == 0), messagesReduce
 		}
-		return isValidLiteralValue(itemType, valueAST)
+		return isValidLiteralValue(itemType, valueAST, nonSpec)
 	case *InputObject:
 		// Input objects check each defined field and look for undefined fields.
 		valueAST, ok := valueAST.(*ast.ObjectValue)
@@ -1786,10 +1836,21 @@ func isValidLiteralValue(ttype Input, valueAST ast.Value) (bool, []string) {
 		// Ensure every defined field is valid.
 		for fieldName, field := range fields {
 			var fieldASTValue ast.Value
-			if fieldAST := fieldASTMap[fieldName]; fieldAST != nil {
+			fieldAST, ok := fieldASTMap[fieldName]
+			if ok && fieldAST != nil {
 				fieldASTValue = fieldAST.Value
 			}
-			if isValid, messages := isValidLiteralValue(field.Type, fieldASTValue); !isValid {
+			// Spec §3.10 Input Coercion and §5.6.4 Input Object Required Fields: a
+			// field that declares a default value is optional even when its type is
+			// non-null. A field written in the literal is still validated.
+			//
+			// Nullish is the same test that coercion applies, so a default that
+			// coercion will not substitute does not make the field optional here
+			// either.
+			if !nonSpec && !ok && !isNullish(field.DefaultValue) {
+				continue
+			}
+			if isValid, messages := isValidLiteralValue(field.Type, fieldASTValue, nonSpec); !isValid {
 				for _, message := range messages {
 					messagesReduce = append(messagesReduce, fmt.Sprintf("In field \"%v\": %v", fieldName, message))
 				}

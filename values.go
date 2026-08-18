@@ -27,9 +27,12 @@ func getVariableValues(
 			continue
 		}
 		varName := defAST.Variable.Name.Value
-		if varValue, err := getVariableValue(schema, defAST, inputs[varName]); err != nil {
+		input, provided := inputs[varName]
+		varValue, err := getVariableValue(schema, defAST, input, provided)
+		if err != nil {
 			return values, err
-		} else {
+		}
+		if schema.nonSpecArgumentHandling || provided || defAST.DefaultValue != nil {
 			values[varName] = varValue
 		}
 	}
@@ -40,7 +43,7 @@ func getVariableValues(
 // definitions and list of argument AST nodes.
 func getArgumentValues(
 	argDefs []*Argument, argASTs []*ast.Argument,
-	variableValues map[string]interface{}) map[string]interface{} {
+	variableValues map[string]interface{}, nonSpec bool) (map[string]interface{}, error) {
 
 	argASTMap := map[string]*ast.Argument{}
 	for _, argAST := range argASTs {
@@ -50,31 +53,144 @@ func getArgumentValues(
 	}
 	results := map[string]interface{}{}
 	for _, argDef := range argDefs {
-		var (
-			tmp         interface{}
-			value       ast.Value
-			isUndefined bool
-		)
-		if tmpValue, ok := argASTMap[argDef.PrivateName]; ok {
-			value = tmpValue.Value
-		} else {
-			isUndefined = true
+		var value ast.Value
+		argAST, ok := argASTMap[argDef.PrivateName]
+		if ok {
+			value = argAST.Value
 		}
-		if tmp = valueFromAST(value, argDef.Type, variableValues); isNullish(tmp) {
+		if nonSpec {
+			isUndefined := !ok
+			tmp := valueFromAST(value, argDef.Type, variableValues, nonSpec)
+			if isNullish(tmp) {
+				tmp = argDef.DefaultValue
+			}
+			if !isUndefined && tmp == nil {
+				results[argDef.PrivateName] = nil
+			} else if !isNullish(tmp) {
+				results[argDef.PrivateName] = tmp
+			}
+			continue
+		}
+		// hasValue is false when the argument is not written in the query, or
+		// when it references a variable the caller did not supply. Only then
+		// does the default apply — an explicit null is a supplied value.
+		isUndefined := !ok || isUnprovidedVariable(value, variableValues)
+		tmp := valueFromAST(value, argDef.Type, variableValues, nonSpec)
+		// A literal the argument's type cannot parse also leaves tmp nullish. The
+		// specification calls for a field error there (CoerceArgumentValues
+		// §6.4.1); this implementation has always fallen back to the default
+		// instead, and such a document fails validation anyway, so that case is
+		// left as it is. Only a supplied null keeps its null.
+		if isNullish(tmp) && !isProvidedNullVariable(value, variableValues) {
 			tmp = argDef.DefaultValue
 		}
-		if !isUndefined && tmp == nil {
-			results[argDef.PrivateName] = nil
-		} else if !isNullish(tmp) {
+		// Spec §6.4.1 ② for the argument itself, and the fourth rule of input
+		// object coercion (§3.10) for a field whose value came from a variable: a
+		// null at a non-null position is a field error. The default was already
+		// applied above, so a null still standing here is one the caller supplied
+		// — or, for the argument itself, a value that was never supplied and has
+		// no default to stand in.
+		if message, found := firstNonNullViolation(tmp, argDef.Type); found {
+			var nodes []ast.Node
+			if argAST != nil {
+				nodes = []ast.Node{argAST}
+			}
+			text := fmt.Sprintf("Argument %q has invalid value.\n%v", argDef.PrivateName, message)
+			if _, isNonNull := argDef.Type.(*NonNull); isNonNull && isNullish(tmp) {
+				// The argument itself is the null, so there is no path to report.
+				text = fmt.Sprintf(`Argument "%v" of non-null type "%v" must not be null.`,
+					argDef.PrivateName, argDef.Type)
+			}
+			return nil, gqlerrors.NewError(text, nodes, "", nil, []int{}, nil)
+		}
+		if !isUndefined || !isNullish(tmp) {
 			results[argDef.PrivateName] = tmp
 		}
 	}
-	return results
+	return results, nil
+}
+
+// Walks a coerced argument value and reports the first null sitting at a
+// non-null position, together with the path leading to it. Spec §6.4.1 ② covers
+// the argument itself and the fourth rule of input object coercion (§3.10)
+// covers a field whose value came from a variable: in both cases a null that the
+// caller supplied where the type is non-null is a field error.
+//
+// Only entries the coerced value actually carries are visited. A field the
+// caller never supplied is absent from the map, and whether that is allowed is
+// the validation rules' business, not this walk's.
+func firstNonNullViolation(value interface{}, ttype Input) (string, bool) {
+	switch ttype := ttype.(type) {
+	case *NonNull:
+		if isNullish(value) {
+			if name := ttype.OfType.Name(); name != "" {
+				return fmt.Sprintf(`Expected "%v!", found null.`, name), true
+			}
+			return "Expected non-null value, found null.", true
+		}
+		ofType, _ := ttype.OfType.(Input)
+		return firstNonNullViolation(value, ofType)
+	case *List:
+		itemType, _ := ttype.OfType.(Input)
+		valType := reflect.ValueOf(value)
+		if valType.Kind() != reflect.Slice {
+			return "", false
+		}
+		for i := 0; i < valType.Len(); i++ {
+			if message, found := firstNonNullViolation(valType.Index(i).Interface(), itemType); found {
+				return fmt.Sprintf("In element #%v: %v", i+1, message), true
+			}
+		}
+	case *InputObject:
+		valueMap, ok := value.(map[string]interface{})
+		if !ok {
+			return "", false
+		}
+		// Sorted so the reported field is stable across runs.
+		fieldNames := make([]string, 0, len(valueMap))
+		for fieldName := range valueMap {
+			fieldNames = append(fieldNames, fieldName)
+		}
+		sort.Strings(fieldNames)
+		fields := ttype.Fields()
+		for _, fieldName := range fieldNames {
+			field, ok := fields[fieldName]
+			if !ok {
+				continue
+			}
+			if message, found := firstNonNullViolation(valueMap[fieldName], field.Type); found {
+				return fmt.Sprintf("In field %q: %v", fieldName, message), true
+			}
+		}
+	}
+	return "", false
+}
+
+// Returns true if value is a reference to a variable the caller did not supply.
+func isUnprovidedVariable(value ast.Value, variables map[string]interface{}) bool {
+	v, ok := value.(*ast.Variable)
+	if !ok || v.Name == nil {
+		return false
+	}
+	_, provided := variables[v.Name.Value]
+	return !provided
+}
+
+// Returns true if value is a reference to a variable the caller supplied as
+// null. Such a null is a value of its own, so no default may stand in for it.
+func isProvidedNullVariable(value ast.Value, variables map[string]interface{}) bool {
+	v, ok := value.(*ast.Variable)
+	if !ok || v.Name == nil {
+		return false
+	}
+	supplied, provided := variables[v.Name.Value]
+	return provided && isNullish(supplied)
 }
 
 // Given a variable definition, and any value of input, return a value which
 // adheres to the variable definition, or throw an error.
-func getVariableValue(schema Schema, definitionAST *ast.VariableDefinition, input interface{}) (interface{}, error) {
+func getVariableValue(schema Schema, definitionAST *ast.VariableDefinition, input interface{}, provided bool) (interface{}, error) {
+	nonSpec := schema.nonSpecArgumentHandling
 	ttype, err := typeFromAST(schema, definitionAST.Type)
 	if err != nil {
 		return nil, err
@@ -93,14 +209,25 @@ func getVariableValue(schema Schema, definitionAST *ast.VariableDefinition, inpu
 		)
 	}
 
-	isValid, messages := isValidInputValue(input, ttype)
+	// Spec §6.1.2 ①: the default stands in for a value the caller did not supply,
+	// and that step precedes the non-null requirement in ②. Applying it here is
+	// what lets a non-null variable declare a default — the validation below
+	// would otherwise reject the very case the default exists for. An explicitly
+	// supplied null is a value, so it does not reach this branch.
+	if !nonSpec && !provided && definitionAST.DefaultValue != nil {
+		return valueFromAST(definitionAST.DefaultValue, ttype, nil, nonSpec), nil
+	}
+
+	isValid, messages := isValidInputValue(input, ttype, nonSpec)
 	if isValid {
 		if isNullish(input) {
-			if definitionAST.DefaultValue != nil {
-				return valueFromAST(definitionAST.DefaultValue, ttype, nil), nil
+			// Only a schema that opted out still lets the default replace a supplied
+			// null; the spec-compliant path applied the default above.
+			if nonSpec && definitionAST.DefaultValue != nil {
+				return valueFromAST(definitionAST.DefaultValue, ttype, nil, nonSpec), nil
 			}
 		}
-		return coerceValue(ttype, input), nil
+		return coerceValue(ttype, input, nonSpec), nil
 	}
 	if isNullish(input) {
 		return "", gqlerrors.NewError(
@@ -135,24 +262,24 @@ func getVariableValue(schema Schema, definitionAST *ast.VariableDefinition, inpu
 }
 
 // Given a type and any value, return a runtime value coerced to match the type.
-func coerceValue(ttype Input, value interface{}) interface{} {
+func coerceValue(ttype Input, value interface{}, nonSpec bool) interface{} {
 	if isNullish(value) {
 		return nil
 	}
 	switch ttype := ttype.(type) {
 	case *NonNull:
-		return coerceValue(ttype.OfType, value)
+		return coerceValue(ttype.OfType, value, nonSpec)
 	case *List:
 		var values = []interface{}{}
 		valType := reflect.ValueOf(value)
 		if valType.Kind() == reflect.Slice {
 			for i := 0; i < valType.Len(); i++ {
 				val := valType.Index(i).Interface()
-				values = append(values, coerceValue(ttype.OfType, val))
+				values = append(values, coerceValue(ttype.OfType, val, nonSpec))
 			}
 			return values
 		}
-		return append(values, coerceValue(ttype.OfType, value))
+		return append(values, coerceValue(ttype.OfType, value, nonSpec))
 	case *InputObject:
 		var obj = map[string]interface{}{}
 		valueMap, _ := value.(map[string]interface{})
@@ -165,7 +292,13 @@ func coerceValue(ttype Input, value interface{}) interface{} {
 			if !ok && isNullish(field.DefaultValue) {
 				continue
 			}
-			fieldValue := coerceValue(field.Type, v)
+			// The key is present and holds null: the caller supplied a value, so
+			// the field's default must not stand in for it.
+			if !nonSpec && ok && isNullish(v) {
+				obj[name] = nil
+				continue
+			}
+			fieldValue := coerceValue(field.Type, v, nonSpec)
 			if isNullish(fieldValue) {
 				fieldValue = field.DefaultValue
 			}
@@ -217,7 +350,7 @@ func typeFromAST(schema Schema, inputTypeAST ast.Type) (Type, error) {
 // Given a value and a GraphQL type, determine if the value will be
 // accepted for that type. This is primarily useful for validating the
 // runtime values of query variables.
-func isValidInputValue(value interface{}, ttype Input) (bool, []string) {
+func isValidInputValue(value interface{}, ttype Input, nonSpec bool) (bool, []string) {
 	if isNullish(value) {
 		if ttype, ok := ttype.(*NonNull); ok {
 			if ttype.OfType.Name() != "" {
@@ -229,7 +362,7 @@ func isValidInputValue(value interface{}, ttype Input) (bool, []string) {
 	}
 	switch ttype := ttype.(type) {
 	case *NonNull:
-		return isValidInputValue(value, ttype.OfType)
+		return isValidInputValue(value, ttype.OfType, nonSpec)
 	case *List:
 		valType := reflect.ValueOf(value)
 		if valType.Kind() == reflect.Ptr {
@@ -239,14 +372,14 @@ func isValidInputValue(value interface{}, ttype Input) (bool, []string) {
 			messagesReduce := []string{}
 			for i := 0; i < valType.Len(); i++ {
 				val := valType.Index(i).Interface()
-				_, messages := isValidInputValue(val, ttype.OfType)
+				_, messages := isValidInputValue(val, ttype.OfType, nonSpec)
 				for idx, message := range messages {
 					messagesReduce = append(messagesReduce, fmt.Sprintf(`In element #%v: %v`, idx+1, message))
 				}
 			}
 			return (len(messagesReduce) == 0), messagesReduce
 		}
-		return isValidInputValue(value, ttype.OfType)
+		return isValidInputValue(value, ttype.OfType, nonSpec)
 
 	case *InputObject:
 		messagesReduce := []string{}
@@ -280,7 +413,22 @@ func isValidInputValue(value interface{}, ttype Input) (bool, []string) {
 
 		// Ensure every defined field is valid.
 		for _, fieldName := range fieldNames {
-			_, messages := isValidInputValue(valueMap[fieldName], fields[fieldName].Type)
+			field := fields[fieldName]
+			v, ok := valueMap[fieldName]
+			// Spec §3.10 Input Coercion and §5.6.4 Input Object Required Fields: a
+			// field that declares a default value is optional even when its type is
+			// non-null, because the default stands in for the value the caller did
+			// not supply. A key that is present and holds null is a supplied value,
+			// so it is still validated.
+			//
+			// The test matches the one coercion applies in coerceValue and
+			// valueFromAST: a nullish default is not a value either of them will
+			// substitute, so treating it as one here would pass a field that then
+			// goes missing from the coerced map.
+			if !nonSpec && !ok && !isNullish(field.DefaultValue) {
+				continue
+			}
+			_, messages := isValidInputValue(v, field.Type, nonSpec)
 			if messages != nil {
 				for _, message := range messages {
 					messagesReduce = append(messagesReduce, fmt.Sprintf(`In field "%v": %v`, fieldName, message))
@@ -354,7 +502,7 @@ func isIterable(src interface{}) bool {
  * | Int / Float          | Number        |
  *
  */
-func valueFromAST(valueAST ast.Value, ttype Input, variables map[string]interface{}) interface{} {
+func valueFromAST(valueAST ast.Value, ttype Input, variables map[string]interface{}, nonSpec bool) interface{} {
 	if valueAST == nil {
 		return nil
 	}
@@ -370,27 +518,23 @@ func valueFromAST(valueAST ast.Value, ttype Input, variables map[string]interfac
 	}
 	switch ttype := ttype.(type) {
 	case *NonNull:
-		return valueFromAST(valueAST, ttype.OfType, variables)
+		return valueFromAST(valueAST, ttype.OfType, variables, nonSpec)
 	case *List:
 		values := []interface{}{}
 		if valueAST, ok := valueAST.(*ast.ListValue); ok {
 			for _, itemAST := range valueAST.Values {
-				values = append(values, valueFromAST(itemAST, ttype.OfType, variables))
+				values = append(values, valueFromAST(itemAST, ttype.OfType, variables, nonSpec))
 			}
 			return values
 		}
-		return append(values, valueFromAST(valueAST, ttype.OfType, variables))
+		return append(values, valueFromAST(valueAST, ttype.OfType, variables, nonSpec))
 	case *InputObject:
-		var (
-			ok bool
-			ov *ast.ObjectValue
-			of *ast.ObjectField
-		)
-		if ov, ok = valueAST.(*ast.ObjectValue); !ok {
+		ov, ok := valueAST.(*ast.ObjectValue)
+		if !ok {
 			return nil
 		}
 		fieldASTs := map[string]*ast.ObjectField{}
-		for _, of = range ov.Fields {
+		for _, of := range ov.Fields {
 			if of == nil || of.Name == nil {
 				continue
 			}
@@ -398,20 +542,29 @@ func valueFromAST(valueAST ast.Value, ttype Input, variables map[string]interfac
 		}
 		obj := map[string]interface{}{}
 		for name, field := range ttype.Fields() {
-			var (
-				value       interface{}
-				isUndefined bool
-			)
-			if of, ok = fieldASTs[name]; ok {
-				value = valueFromAST(of.Value, field.Type, variables)
-			} else {
-				isUndefined = true
-				value = field.DefaultValue
+			of, ok := fieldASTs[name]
+			if nonSpec {
+				var value interface{}
+				if ok {
+					value = valueFromAST(of.Value, field.Type, variables, nonSpec)
+				} else {
+					value = field.DefaultValue
+				}
+				if ok && value == nil {
+					obj[name] = nil
+				} else if !isNullish(value) {
+					obj[name] = value
+				}
+				continue
 			}
-			if !isUndefined && value == nil {
-				obj[name] = nil
-			} else if !isNullish(value) {
-				obj[name] = value
+			// The field is written in the literal and does not reference an
+			// unsupplied variable: the caller supplied a value, so the field's
+			// default must not stand in for it.
+			supplied := ok && !isUnprovidedVariable(of.Value, variables)
+			if supplied {
+				obj[name] = valueFromAST(of.Value, field.Type, variables, nonSpec)
+			} else if !isNullish(field.DefaultValue) {
+				obj[name] = field.DefaultValue
 			}
 		}
 		return obj

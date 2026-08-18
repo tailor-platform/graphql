@@ -7,6 +7,32 @@ type SchemaConfig struct {
 	Types        []Type
 	Directives   []*Directive
 	Extensions   []Extension
+
+	// NonSpecArgumentHandling restores argument handling that contradicts the
+	// GraphQL specification. Leave it false: the zero value follows the
+	// specification (CoerceArgumentValues §6.4.1, CoerceVariableValues §6.1.2,
+	// input object coercion §3.10 and required arguments §5.4.2.1):
+	//
+	//   - A variable the caller did not supply leaves its argument absent from
+	//     ResolveParams.Args instead of materialising it as nil, so a resolver
+	//     can tell "not provided" from "explicitly null".
+	//   - A default value applies only when no value was supplied. An explicit
+	//     null stays null instead of falling back to the default.
+	//   - A non-null argument that declares a default value is optional, so a
+	//     document may omit it and still validate.
+	//
+	// Releases before that fix collapsed the first two distinctions — every
+	// declared argument arrived present, and an explicit null was replaced by
+	// the default — and rejected any document that omitted a non-null argument,
+	// default or not. None of that was a deliberate design: it was a defect,
+	// and a schema that sets this flag keeps diverging from the specification
+	// and from every other GraphQL implementation.
+	//
+	// Deprecated: this exists only so an application built against the defect
+	// keeps working while it migrates, and it will be removed once no schema
+	// needs it. Set it to true to reproduce the old behaviour byte-for-byte,
+	// then migrate off it.
+	NonSpecArgumentHandling bool
 }
 
 type TypeMap map[string]Type
@@ -43,6 +69,8 @@ type Schema struct {
 	implementations  map[string][]*Object
 	possibleTypeMap  map[string]map[string]bool
 	extensions       []Extension
+
+	nonSpecArgumentHandling bool
 }
 
 func NewSchema(config SchemaConfig) (Schema, error) {
@@ -65,6 +93,7 @@ func NewSchema(config SchemaConfig) (Schema, error) {
 	schema.queryType = config.Query
 	schema.mutationType = config.Mutation
 	schema.subscriptionType = config.Subscription
+	schema.nonSpecArgumentHandling = config.NonSpecArgumentHandling
 
 	// Provide specified directives (e.g. @include and @skip) by default.
 	schema.directives = config.Directives

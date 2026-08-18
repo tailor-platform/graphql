@@ -14,14 +14,15 @@ import (
 type fieldDefFn func(schema *Schema, parentType Type, fieldAST *ast.Field) *FieldDefinition
 
 type TypeInfo struct {
-	schema          *Schema
-	typeStack       []Output
-	parentTypeStack []Composite
-	inputTypeStack  []Input
-	fieldDefStack   []*FieldDefinition
-	directive       *Directive
-	argument        *Argument
-	getFieldDef     fieldDefFn
+	schema            *Schema
+	typeStack         []Output
+	parentTypeStack   []Composite
+	inputTypeStack    []Input
+	defaultValueStack []interface{}
+	fieldDefStack     []*FieldDefinition
+	directive         *Directive
+	argument          *Argument
+	getFieldDef       fieldDefFn
 }
 
 type TypeInfoConfig struct {
@@ -61,6 +62,16 @@ func (ti *TypeInfo) ParentType() Composite {
 func (ti *TypeInfo) InputType() Input {
 	if len(ti.inputTypeStack) > 0 {
 		return ti.inputTypeStack[len(ti.inputTypeStack)-1]
+	}
+	return nil
+}
+
+// DefaultValue returns the default value declared by the argument or input
+// object field currently being visited, or nil when the position declares none.
+// Spec §5.8.5 calls this hasLocationDefaultValue.
+func (ti *TypeInfo) DefaultValue() interface{} {
+	if len(ti.defaultValueStack) > 0 {
+		return ti.defaultValueStack[len(ti.defaultValueStack)-1]
 	}
 	return nil
 }
@@ -163,9 +174,16 @@ func (ti *TypeInfo) Enter(node ast.Node) {
 			argType = argDef.Type
 		}
 		ti.argument = argDef
+		var argDefault interface{}
+		if argDef != nil {
+			argDefault = argDef.DefaultValue
+		}
+		ti.defaultValueStack = append(ti.defaultValueStack, argDefault)
 		ti.inputTypeStack = append(ti.inputTypeStack, argType)
 	case *ast.ListValue:
 		listType := GetNullable(ti.InputType())
+		// List positions never have a default value.
+		ti.defaultValueStack = append(ti.defaultValueStack, nil)
 		if list, ok := listType.(*List); ok {
 			ti.inputTypeStack = append(ti.inputTypeStack, list.OfType)
 		} else {
@@ -173,6 +191,7 @@ func (ti *TypeInfo) Enter(node ast.Node) {
 		}
 	case *ast.ObjectField:
 		var fieldType Input
+		var fieldDefault interface{}
 		objectType := GetNamed(ti.InputType())
 
 		if objectType, ok := objectType.(*InputObject); ok {
@@ -182,8 +201,10 @@ func (ti *TypeInfo) Enter(node ast.Node) {
 			}
 			if inputField, ok := objectType.Fields()[nameVal]; ok {
 				fieldType = inputField.Type
+				fieldDefault = inputField.DefaultValue
 			}
 		}
+		ti.defaultValueStack = append(ti.defaultValueStack, fieldDefault)
 		ti.inputTypeStack = append(ti.inputTypeStack, fieldType)
 	}
 }
@@ -218,11 +239,19 @@ func (ti *TypeInfo) Leave(node ast.Node) {
 		}
 	case kinds.Argument:
 		ti.argument = nil
+		// pop ti.defaultValueStack
+		if len(ti.defaultValueStack) > 0 {
+			_, ti.defaultValueStack = ti.defaultValueStack[len(ti.defaultValueStack)-1], ti.defaultValueStack[:len(ti.defaultValueStack)-1]
+		}
 		// pop ti.inputTypeStack
 		if len(ti.inputTypeStack) > 0 {
 			_, ti.inputTypeStack = ti.inputTypeStack[len(ti.inputTypeStack)-1], ti.inputTypeStack[:len(ti.inputTypeStack)-1]
 		}
 	case kinds.ListValue, kinds.ObjectField:
+		// pop ti.defaultValueStack
+		if len(ti.defaultValueStack) > 0 {
+			_, ti.defaultValueStack = ti.defaultValueStack[len(ti.defaultValueStack)-1], ti.defaultValueStack[:len(ti.defaultValueStack)-1]
+		}
 		// pop ti.inputTypeStack
 		if len(ti.inputTypeStack) > 0 {
 			_, ti.inputTypeStack = ti.inputTypeStack[len(ti.inputTypeStack)-1], ti.inputTypeStack[:len(ti.inputTypeStack)-1]

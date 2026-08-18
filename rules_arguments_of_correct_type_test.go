@@ -799,3 +799,64 @@ func TestValidate_ArgValuesOfCorrectType_DirectiveArguments_WithDirectivesWithIn
 			),
 		})
 }
+
+// One field whose input object declares a non-null field with a default value,
+// under whichever mode the caller asks for.
+func nonNullInputFieldWithDefaultSchema(t *testing.T, nonSpec bool) graphql.Schema {
+	t.Helper()
+	input := graphql.NewInputObject(graphql.InputObjectConfig{
+		Name: "FieldDefaultInput",
+		Fields: graphql.InputObjectConfigFieldMap{
+			"a": &graphql.InputObjectFieldConfig{
+				Type:         graphql.NewNonNull(graphql.String),
+				DefaultValue: "FIELDDEF",
+			},
+		},
+	})
+	schema, err := graphql.NewSchema(graphql.SchemaConfig{
+		Query: graphql.NewObject(graphql.ObjectConfig{
+			Name: "Query",
+			Fields: graphql.Fields{
+				"f": &graphql.Field{
+					Type: graphql.String,
+					Args: graphql.FieldConfigArgument{
+						"input": &graphql.ArgumentConfig{Type: input},
+					},
+				},
+			},
+		}),
+		NonSpecArgumentHandling: nonSpec,
+	})
+	if err != nil {
+		t.Fatalf("Unexpected error, got: %v", err)
+	}
+	return schema
+}
+
+// Spec §5.6.4: an input field is required only when its type is non-null AND it
+// declares no default value.
+func TestValidate_ArgumentsOfCorrectType_NonNullInputFieldWithDefaultMayBeOmitted(t *testing.T) {
+	schema := nonNullInputFieldWithDefaultSchema(t, false)
+	testutil.ExpectPassesRuleWithSchema(t, &schema, graphql.ArgumentsOfCorrectTypeRule, `
+        {
+          f(input: {})
+        }
+    `)
+}
+
+// NonSpecArgumentHandling keeps the older reading, under which every non-null
+// input field is required whether or not it declares a default.
+func TestValidate_ArgumentsOfCorrectType_NonSpecKeepsNonNullInputFieldRequired(t *testing.T) {
+	schema := nonNullInputFieldWithDefaultSchema(t, true)
+	testutil.ExpectFailsRuleWithSchema(t, &schema, graphql.ArgumentsOfCorrectTypeRule, `
+        {
+          f(input: {})
+        }
+    `, []gqlerrors.FormattedError{
+		testutil.RuleError(
+			`Argument "input" has invalid value {}.`+
+				"\nIn field \"a\": Expected \"String!\", found null.",
+			3, 20,
+		),
+	})
+}

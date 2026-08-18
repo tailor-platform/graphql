@@ -481,10 +481,7 @@ func collectFields(p collectFieldsParams) (fields map[string][]*ast.Field) {
 // Determines if a field should be included based on the @include and @skip
 // directives, where @skip has higher precedence than @include.
 func shouldIncludeNode(eCtx *executionContext, directives []*ast.Directive) bool {
-	var (
-		skipAST, includeAST *ast.Directive
-		argValues           map[string]interface{}
-	)
+	var skipAST, includeAST *ast.Directive
 	for _, directive := range directives {
 		if directive == nil || directive.Name == nil {
 			continue
@@ -496,20 +493,38 @@ func shouldIncludeNode(eCtx *executionContext, directives []*ast.Directive) bool
 			includeAST = directive
 		}
 	}
+	nonSpec := eCtx.Schema.nonSpecArgumentHandling
 	// precedence: skipAST > includeAST
 	if skipAST != nil {
-		argValues = getArgumentValues(SkipDirective.Args, skipAST.Arguments, eCtx.VariableValues)
-		if skipIf, ok := argValues["if"].(bool); ok && skipIf {
+		if directiveIfIsTrue(SkipDirective.Args, skipAST.Arguments, eCtx.VariableValues, nonSpec) {
 			return false // excluded selectionSet's fields
 		}
 	}
 	if includeAST != nil {
-		argValues = getArgumentValues(IncludeDirective.Args, includeAST.Arguments, eCtx.VariableValues)
-		if includeIf, ok := argValues["if"].(bool); ok && !includeIf {
+		if nonSpec {
+			argValues, _ := getArgumentValues(IncludeDirective.Args, includeAST.Arguments, eCtx.VariableValues, nonSpec)
+			if includeIf, ok := argValues["if"].(bool); ok && !includeIf {
+				return false // excluded selectionSet's fields
+			}
+		} else if !directiveIfIsTrue(IncludeDirective.Args, includeAST.Arguments, eCtx.VariableValues, nonSpec) {
+			// Spec §6.3.2: the selection is kept only when if is true.
 			return false // excluded selectionSet's fields
 		}
 	}
 	return true
+}
+
+// Reports whether the directive's "if" argument resolves to true. Spec §6.3.2
+// CollectFields asks only that question of @skip and @include — it does not
+// coerce their arguments — so a value that is not true, including one a coercion
+// failure left unusable, simply answers false rather than raising an error.
+func directiveIfIsTrue(argDefs []*Argument, argASTs []*ast.Argument, variableValues map[string]interface{}, nonSpec bool) bool {
+	argValues, err := getArgumentValues(argDefs, argASTs, variableValues, nonSpec)
+	if err != nil {
+		return false
+	}
+	ifValue, ok := argValues["if"].(bool)
+	return ok && ifValue
 }
 
 // Determines if a fragment is applicable to the given type.
@@ -624,7 +639,12 @@ func resolveField(eCtx *executionContext, parentType *Object, source interface{}
 	// Build a map of arguments from the field.arguments AST, using the
 	// variables scope to fulfill any variable references.
 	// TODO: find a way to memoize, in case this field is within a List type.
-	args := getArgumentValues(fieldDef.Args, fieldAST.Arguments, eCtx.VariableValues)
+	args, argErr := getArgumentValues(fieldDef.Args, fieldAST.Arguments, eCtx.VariableValues, eCtx.Schema.nonSpecArgumentHandling)
+	if argErr != nil {
+		// Same idiom as a failing resolver below: the deferred recover turns this
+		// into a field error via handleFieldError.
+		panic(argErr)
+	}
 
 	info := ResolveInfo{
 		FieldName:      fieldName,

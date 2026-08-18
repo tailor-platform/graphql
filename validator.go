@@ -83,6 +83,9 @@ var _ HasSelectionSet = (*ast.FragmentDefinition)(nil)
 type VariableUsage struct {
 	Node *ast.Variable
 	Type Input
+	// LocationDefaultValue is the default value declared by the argument or input
+	// object field where this usage sits. Spec §5.8.5 hasLocationDefaultValue.
+	LocationDefaultValue interface{}
 }
 
 type ValidationContext struct {
@@ -239,8 +242,9 @@ func (ctx *ValidationContext) VariableUsages(node HasSelectionSet) []*VariableUs
 				Kind: func(p visitor.VisitFuncParams) (string, interface{}) {
 					if node, ok := p.Node.(*ast.Variable); ok && node != nil {
 						usages = append(usages, &VariableUsage{
-							Node: node,
-							Type: typeInfo.InputType(),
+							Node:                 node,
+							Type:                 typeInfo.InputType(),
+							LocationDefaultValue: typeInfo.DefaultValue(),
 						})
 					}
 					return visitor.ActionNoChange, nil

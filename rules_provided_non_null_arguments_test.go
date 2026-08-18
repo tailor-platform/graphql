@@ -175,3 +175,172 @@ func TestValidate_ProvidedNonNullArguments_DirectiveArguments_WithDirectiveWithM
 		testutil.RuleError(`Directive "@skip" argument "if" of type "Boolean!" is required but not provided.`, 4, 18),
 	})
 }
+
+// One field whose non-null argument declares a default value, under whichever
+// mode the caller asks for.
+func nonNullArgWithDefaultSchema(t *testing.T, nonSpec bool) graphql.Schema {
+	t.Helper()
+	schema, err := graphql.NewSchema(graphql.SchemaConfig{
+		Query: graphql.NewObject(graphql.ObjectConfig{
+			Name: "Query",
+			Fields: graphql.Fields{
+				"fieldWithDefault": &graphql.Field{
+					Type: graphql.String,
+					Args: graphql.FieldConfigArgument{
+						"arg": &graphql.ArgumentConfig{
+							Type:         graphql.NewNonNull(graphql.Boolean),
+							DefaultValue: true,
+						},
+					},
+				},
+			},
+		}),
+		NonSpecArgumentHandling: nonSpec,
+	})
+	if err != nil {
+		t.Fatalf("Unexpected error, got: %v", err)
+	}
+	return schema
+}
+
+// Spec §5.4.2.1: "An argument is required if the argument type is non-null and
+// does not have a default value. Otherwise, the argument is optional."
+// See graphql-go/graphql#739.
+func TestValidate_ProvidedNonNullArguments_FieldArguments_NoErrorOnNonNullArgumentWithDefaultValue(t *testing.T) {
+	schema := nonNullArgWithDefaultSchema(t, false)
+	testutil.ExpectPassesRuleWithSchema(t, &schema, graphql.ProvidedNonNullArgumentsRule, `
+        {
+          fieldWithDefault
+        }
+    `)
+}
+
+// NonSpecArgumentHandling restores the older, stricter reading, under which a
+// non-null argument is required whether or not it declares a default.
+func TestValidate_ProvidedNonNullArguments_FieldArguments_NonSpecErrorsOnNonNullArgumentWithDefaultValue(t *testing.T) {
+	schema := nonNullArgWithDefaultSchema(t, true)
+	testutil.ExpectFailsRuleWithSchema(t, &schema, graphql.ProvidedNonNullArgumentsRule, `
+        {
+          fieldWithDefault
+        }
+    `, []gqlerrors.FormattedError{
+		testutil.RuleError(`Field "fieldWithDefault" argument "arg" of type "Boolean!" is required but not provided.`, 3, 11),
+	})
+}
+
+func TestValidate_ProvidedNonNullArguments_FieldArguments_StillErrorsOnNonNullArgumentWithoutDefaultValue(t *testing.T) {
+	schema, err := graphql.NewSchema(graphql.SchemaConfig{
+		Query: graphql.NewObject(graphql.ObjectConfig{
+			Name: "Query",
+			Fields: graphql.Fields{
+				"fieldWithoutDefault": &graphql.Field{
+					Type: graphql.String,
+					Args: graphql.FieldConfigArgument{
+						"arg": &graphql.ArgumentConfig{
+							Type: graphql.NewNonNull(graphql.Boolean),
+						},
+					},
+				},
+			},
+		}),
+	})
+	if err != nil {
+		t.Fatalf("Unexpected error, got: %v", err)
+	}
+	testutil.ExpectFailsRuleWithSchema(t, &schema, graphql.ProvidedNonNullArgumentsRule, `
+        {
+          fieldWithoutDefault
+        }
+    `, []gqlerrors.FormattedError{
+		testutil.RuleError(`Field "fieldWithoutDefault" argument "arg" of type "Boolean!" is required but not provided.`, 3, 11),
+	})
+}
+
+// One directive whose non-null argument declares a default value, under
+// whichever mode the caller asks for.
+func nonNullDirectiveArgWithDefaultSchema(t *testing.T, nonSpec bool) graphql.Schema {
+	t.Helper()
+	deferDirective := graphql.NewDirective(graphql.DirectiveConfig{
+		Name: "defer",
+		Locations: []string{
+			graphql.DirectiveLocationFragmentSpread,
+			graphql.DirectiveLocationInlineFragment,
+		},
+		Args: graphql.FieldConfigArgument{
+			"if": &graphql.ArgumentConfig{
+				Type:         graphql.NewNonNull(graphql.Boolean),
+				DefaultValue: true,
+			},
+		},
+	})
+	schema, err := graphql.NewSchema(graphql.SchemaConfig{
+		Query: graphql.NewObject(graphql.ObjectConfig{
+			Name: "Query",
+			Fields: graphql.Fields{
+				"a": &graphql.Field{Type: graphql.String},
+			},
+		}),
+		Directives:              []*graphql.Directive{deferDirective},
+		NonSpecArgumentHandling: nonSpec,
+	})
+	if err != nil {
+		t.Fatalf("Unexpected error, got: %v", err)
+	}
+	return schema
+}
+
+func TestValidate_ProvidedNonNullArguments_DirectiveArguments_NoErrorOnNonNullArgumentWithDefaultValue(t *testing.T) {
+	schema := nonNullDirectiveArgWithDefaultSchema(t, false)
+	testutil.ExpectPassesRuleWithSchema(t, &schema, graphql.ProvidedNonNullArgumentsRule, `
+        {
+          ... on Query @defer {
+            a
+          }
+        }
+    `)
+}
+
+func TestValidate_ProvidedNonNullArguments_DirectiveArguments_NonSpecErrorsOnNonNullArgumentWithDefaultValue(t *testing.T) {
+	schema := nonNullDirectiveArgWithDefaultSchema(t, true)
+	testutil.ExpectFailsRuleWithSchema(t, &schema, graphql.ProvidedNonNullArgumentsRule, `
+        {
+          ... on Query @defer {
+            a
+          }
+        }
+    `, []gqlerrors.FormattedError{
+		testutil.RuleError(`Directive "@defer" argument "if" of type "Boolean!" is required but not provided.`, 3, 24),
+	})
+}
+
+// A default coercion will not substitute — a typed nil pointer is nullish —
+// does not make a non-null argument optional.
+func TestValidate_ProvidedNonNullArguments_FieldArguments_NullishDefaultKeepsArgumentRequired(t *testing.T) {
+	var nilString *string
+	schema, err := graphql.NewSchema(graphql.SchemaConfig{
+		Query: graphql.NewObject(graphql.ObjectConfig{
+			Name: "Query",
+			Fields: graphql.Fields{
+				"fieldWithNullishDefault": &graphql.Field{
+					Type: graphql.String,
+					Args: graphql.FieldConfigArgument{
+						"arg": &graphql.ArgumentConfig{
+							Type:         graphql.NewNonNull(graphql.Boolean),
+							DefaultValue: nilString,
+						},
+					},
+				},
+			},
+		}),
+	})
+	if err != nil {
+		t.Fatalf("Unexpected error, got: %v", err)
+	}
+	testutil.ExpectFailsRuleWithSchema(t, &schema, graphql.ProvidedNonNullArgumentsRule, `
+        {
+          fieldWithNullishDefault
+        }
+    `, []gqlerrors.FormattedError{
+		testutil.RuleError(`Field "fieldWithNullishDefault" argument "arg" of type "Boolean!" is required but not provided.`, 3, 11),
+	})
+}
