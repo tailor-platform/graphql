@@ -1257,11 +1257,11 @@ func PossibleFragmentSpreadsRule(context *ValidationContext) *ValidationRuleInst
 func ProvidedNonNullArgumentsRule(context *ValidationContext) *ValidationRuleInstance {
 
 	// Spec §5.4.2.1: an argument is required only when its type is non-null and
-	// it declares no default value. Nullish is the test coercion applies, so a
-	// default coercion will not substitute leaves the argument required. A schema
-	// that opted into NonSpecArgumentHandling keeps the older, stricter reading,
-	// under which every non-null argument is required whether or not it has a
-	// default.
+	// it declares no default value. Nullish is the test that coercion applies, so
+	// a default that coercion will not substitute leaves the argument required. A
+	// schema that opted into NonSpecArgumentHandling keeps the older, stricter
+	// reading, under which every non-null argument is required whether or not it
+	// has a default.
 	nonSpec := context.Schema().nonSpecArgumentHandling
 
 	visitorOpts := &visitor.VisitorOptions{
@@ -1684,7 +1684,7 @@ func allowedVariableUsage(schema *Schema, varType Type, varDefaultValue ast.Valu
 			// The parser does not accept the null literal, so a default value that
 			// exists is necessarily not null. Revisit if that ever changes.
 			hasNonNullVariableDefaultValue := varDefaultValue != nil
-			// Nullish is the test coercion applies to a declared default, so a
+			// Nullish is the test that coercion applies to a declared default, so a
 			// default it will not substitute does not count as one here either.
 			hasLocationDefaultValue := !isNullish(locationDefaultValue)
 			if !hasNonNullVariableDefaultValue && !hasLocationDefaultValue {
@@ -1844,8 +1844,9 @@ func isValidLiteralValue(ttype Input, valueAST ast.Value, nonSpec bool) (bool, [
 			// field that declares a default value is optional even when its type is
 			// non-null. A field written in the literal is still validated.
 			//
-			// Nullish is the same test coercion applies, so a default coercion will
-			// not substitute does not make the field optional here either.
+			// Nullish is the same test that coercion applies, so a default that
+			// coercion will not substitute does not make the field optional here
+			// either.
 			if !nonSpec && !ok && !isNullish(field.DefaultValue) {
 				continue
 			}
