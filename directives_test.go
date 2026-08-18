@@ -1,6 +1,7 @@
 package graphql_test
 
 import (
+	"encoding/json"
 	"errors"
 	"testing"
 
@@ -513,4 +514,72 @@ func TestDirectivesWorksWithSkipAndIncludeDirectives_NoIncludeOrSkip(t *testing.
 	if !testutil.EqualResults(expected, result) {
 		t.Fatalf("Unexpected result, Diff: %v", testutil.Diff(expected, result))
 	}
+}
+
+// The same two fields under both modes, so the @skip / @include tests below can
+// pin the opt-out column as a regression guard.
+var directivesNonSpecTestSchema, _ = graphql.NewSchema(graphql.SchemaConfig{
+	Query: graphql.NewObject(graphql.ObjectConfig{
+		Name: "TestType",
+		Fields: graphql.Fields{
+			"a": &graphql.Field{Type: graphql.String},
+			"b": &graphql.Field{Type: graphql.String},
+		},
+	}),
+	NonSpecArgumentHandling: true,
+})
+
+// runDirectiveModes executes doc through graphql.Do under both modes. Results are
+// compared as the serialised data map plus the first error, so a test can pin an
+// expected rejection as well as an expected shape.
+func runDirectiveModes(t *testing.T, doc string, vars map[string]interface{}, wantNonSpec, wantSpec string) {
+	t.Helper()
+	run := func(schema graphql.Schema) string {
+		result := graphql.Do(graphql.Params{
+			Schema:         schema,
+			RequestString:  doc,
+			VariableValues: vars,
+			RootObject:     directivesTestData,
+		})
+		data, _ := json.Marshal(result.Data)
+		if len(result.Errors) > 0 {
+			return string(data) + " ERROR: " + result.Errors[0].Message
+		}
+		return string(data)
+	}
+	if got := run(directivesNonSpecTestSchema); got != wantNonSpec {
+		t.Errorf("non-spec mode mismatch\n  got:  %s\n  want: %s", got, wantNonSpec)
+	}
+	if got := run(directivesTestSchema); got != wantSpec {
+		t.Errorf("spec mode mismatch\n  got:  %s\n  want: %s", got, wantSpec)
+	}
+}
+
+// Spec §6.3.2 CollectFields tests @skip and @include structurally rather than
+// coercing their arguments: @skip drops the selection when if is true, and
+// @include keeps it only when if is true. An if that is neither — a variable
+// carrying null, say — is simply "not true", and no error is raised.
+//
+// The one document that reaches this at runtime declares a variable with a
+// non-null default, which §5.8.5 allows at the non-null if argument, and then
+// supplies null for it.
+func TestDirectives_NullIfArgument_IsNotTrue(t *testing.T) {
+	vars := map[string]interface{}{"x": nil}
+
+	t.Run("@skip with a null if keeps the selection", func(t *testing.T) {
+		// Non-spec mode never sees the null: the variable's default replaces it.
+		runDirectiveModes(t, `query Q($x: Boolean = true){ a @skip(if: $x) b }`, vars,
+			`{"b":"b"}`, `{"a":"a","b":"b"}`)
+	})
+	t.Run("@include with a null if drops the selection", func(t *testing.T) {
+		runDirectiveModes(t, `query Q($x: Boolean = true){ a @include(if: $x) b }`, vars,
+			`{"a":"a","b":"b"}`, `{"b":"b"}`)
+	})
+	t.Run("a true value still behaves normally", func(t *testing.T) {
+		v := map[string]interface{}{"x": true}
+		runDirectiveModes(t, `query Q($x: Boolean = true){ a @skip(if: $x) b }`, v,
+			`{"b":"b"}`, `{"b":"b"}`)
+		runDirectiveModes(t, `query Q($x: Boolean = true){ a @include(if: $x) b }`, v,
+			`{"a":"a","b":"b"}`, `{"a":"a","b":"b"}`)
+	})
 }

@@ -493,31 +493,38 @@ func shouldIncludeNode(eCtx *executionContext, directives []*ast.Directive) bool
 			includeAST = directive
 		}
 	}
+	nonSpec := eCtx.Schema.nonSpecArgumentHandling
 	// precedence: skipAST > includeAST
 	if skipAST != nil {
-		argValues, err := getArgumentValues(SkipDirective.Args, skipAST.Arguments, eCtx.VariableValues, eCtx.Schema.nonSpecArgumentHandling)
-		if err != nil {
-			// @skip declares "if: Boolean!" with no default, so a null can only get
-			// here if both variable coercion and validation let it through. Record
-			// the error rather than dropping it, and leave the node out.
-			eCtx.Errors = append(eCtx.Errors, gqlerrors.FormatErrorsFromError(err)...)
-			return false // excluded selectionSet's fields
-		}
-		if skipIf, ok := argValues["if"].(bool); ok && skipIf {
+		if directiveIfIsTrue(SkipDirective.Args, skipAST.Arguments, eCtx.VariableValues, nonSpec) {
 			return false // excluded selectionSet's fields
 		}
 	}
 	if includeAST != nil {
-		argValues, err := getArgumentValues(IncludeDirective.Args, includeAST.Arguments, eCtx.VariableValues, eCtx.Schema.nonSpecArgumentHandling)
-		if err != nil {
-			eCtx.Errors = append(eCtx.Errors, gqlerrors.FormatErrorsFromError(err)...)
-			return false // excluded selectionSet's fields
-		}
-		if includeIf, ok := argValues["if"].(bool); ok && !includeIf {
+		if nonSpec {
+			argValues, _ := getArgumentValues(IncludeDirective.Args, includeAST.Arguments, eCtx.VariableValues, nonSpec)
+			if includeIf, ok := argValues["if"].(bool); ok && !includeIf {
+				return false // excluded selectionSet's fields
+			}
+		} else if !directiveIfIsTrue(IncludeDirective.Args, includeAST.Arguments, eCtx.VariableValues, nonSpec) {
+			// Spec §6.3.2: the selection is kept only when if is true.
 			return false // excluded selectionSet's fields
 		}
 	}
 	return true
+}
+
+// Reports whether the directive's "if" argument resolves to true. Spec §6.3.2
+// CollectFields asks only that question of @skip and @include — it does not
+// coerce their arguments — so a value that is not true, including one a coercion
+// failure left unusable, simply answers false rather than raising an error.
+func directiveIfIsTrue(argDefs []*Argument, argASTs []*ast.Argument, variableValues map[string]interface{}, nonSpec bool) bool {
+	argValues, err := getArgumentValues(argDefs, argASTs, variableValues, nonSpec)
+	if err != nil {
+		return false
+	}
+	ifValue, ok := argValues["if"].(bool)
+	return ok && ifValue
 }
 
 // Determines if a fragment is applicable to the given type.
